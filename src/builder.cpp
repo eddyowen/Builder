@@ -253,6 +253,126 @@ const char* BuildConfig_GetFullBinaryName( const BuildConfig* config ) {
 	return string_builder_to_string( &sb );
 }
 
+enum flagArgumentFormBits_t {
+	JOINED      = bit( 0 ),
+	SEPARATE    = bit( 1 ),
+	COLON       = bit( 2 )
+};
+typedef u32 argumentForms_t;
+
+struct flagRule_t {
+    const char* flag = nullptr;
+    argumentForms_t forms;
+};
+
+static constexpr flagRule_t flagArgumentRules[] = {
+	// MSVC
+	{ "/I",     JOINED | SEPARATE },
+	{ "/Fo",    JOINED | SEPARATE },
+	{ "/Fd",    COLON | SEPARATE },
+	{ "/Fp",    JOINED | COLON | SEPARATE },
+	{ "/Yu",    JOINED },
+	{ "/Yc",    JOINED },
+	{ "/Fi",    SEPARATE },
+	{ "@",      JOINED }, // ED: not supported for now
+	
+	// Clang/GCC
+	{ "-I",         JOINED | SEPARATE },
+	{ "-isystem",   SEPARATE },
+	{ "-iquote",    SEPARATE },
+	{ "-idirafter", SEPARATE },
+	{ "-imacros",   SEPARATE },
+	{ "-include",   SEPARATE },
+	{ "-F",         SEPARATE },
+	{ "-MF",        SEPARATE },
+	{ "-MT",        SEPARATE },
+	{ "-o",         SEPARATE }
+};
+
+static const flagRule_t* IsFlagMatch( const char* arg ) {
+	for ( const auto &r : flagArgumentRules ) {
+		if ( string_starts_with(arg, r.flag) ) {
+			return &r;
+		}
+	}
+
+	return nullptr;
+}
+
+// Processes the compilation arguments and sanitizes those that are paths arguments, to follow the json format,
+// but following the possible combinations in which the compile flag can be provided, based on the compiler
+// (see flagRule_t). This was thought as a more optimal way of doing it, instead of checking character by character for each argument.
+static std::vector<std::string> SanitizeCompilationDatabaseArgs( const Array<const char*>& args ) {
+	std::vector<std::string> sanitized_args;
+	sanitized_args.reserve( args.count );
+
+	For ( size_t, i, 0, args.count ) {
+
+		std::string arg = args[i];
+
+		const flagRule_t *rule = IsFlagMatch( arg.c_str() );
+		if (!rule) {
+			if ( path_is_absolute( arg.c_str() ) || FileIsSourceFile( arg.c_str() ) ) {
+				sanitized_args.emplace_back( path_fix_slashes_json( arg.c_str() ) ); // normal argument
+			} else {
+				sanitized_args.emplace_back( arg.c_str() );
+			}
+
+			continue;
+	   }
+ 
+		u64 rule_length = strlen( rule->flag );
+		bool handled = false;
+
+		// Joined form
+		if ( ( rule->forms & JOINED ) && arg.size() > rule_length && arg.substr( 0, rule_length ) == rule->flag ) {
+			std::string path = arg.substr( rule_length );
+			if ( !path.empty() ) {
+				sanitized_args.emplace_back( std::string( rule->flag ) + path_fix_slashes_json( path.c_str() ) );
+				handled = true;
+			}
+		}
+
+		// Colon form
+		if (!handled && (rule->forms & COLON) && arg.size() > rule_length &&
+			arg[rule_length] == ':') {
+			std::string path = arg.substr( rule_length + 1 );
+			sanitized_args.emplace_back( std::string( rule->flag ) + ":" + path_fix_slashes_json( path.c_str() ) );
+			handled = true;
+		}
+
+		// Separate form
+		if ( !handled && ( rule->forms & SEPARATE ) ) {
+			sanitized_args.push_back( arg ); // flag itself
+			if ( i + 1 < args.count ) {
+				std::string path = args[++i];
+				sanitized_args.emplace_back(  path_fix_slashes_json( path.c_str() ) );
+			}
+		}
+
+		// If it doesn't contain any form (which is unlikely), keep as is
+		if ( !handled && !( rule->forms & SEPARATE ) ) {
+			sanitized_args.emplace_back( arg );
+		}
+	}
+
+	return sanitized_args;
+}
+
+void RecordCompilationDatabaseEntry(
+	buildContext_t* buildContext,
+	const char* sourceFileName,
+	const Array<const char*>& compilationCommandArray )
+{
+	compilationDatabaseEntry_t entry;
+	entry.directory  = path_fix_slashes_json( buildContext->inputFilePath.data );
+	entry.file       = path_fix_slashes_json( sourceFileName );
+	entry.arguments  = SanitizeCompilationDatabaseArgs( compilationCommandArray );
+	
+	buildContext->compilationDatabase.emplace_back( entry );
+}
+
+
 s32 RunProc( Array<const char*>* args, Array<const char*>* environmentVariables, const procFlags_t procFlags ) {
 	assert( args );
 	assert( args->data );
@@ -335,7 +455,7 @@ static s32 ShowUsage( const s32 exitCode ) {
 	return exitCode;
 }
 
-static buildResult_t BuildBinary( buildContext_t* context, BuildConfig* config, compilerBackend_t* compilerBackend ) {
+static buildResult_t BuildBinary( buildContext_t* context, BuildConfig* config, compilerBackend_t* compilerBackend, bool generateCompilationDatabase = false ) {
 	// create binary folder
 	if ( !folder_create_if_it_doesnt_exist( config->binary_folder.c_str() ) ) {
 		errorCode_t errorCode = get_last_error_code();
@@ -395,6 +515,13 @@ static buildResult_t BuildBinary( buildContext_t* context, BuildConfig* config, 
 		return false;
 	};
 
+	// Process only once how the base compilation command should look like, fill up dep/output/source args later for each source file
+	compilationCommandArchetype_t cmdArchetype{};
+	if ( !compilerBackend->GetCompilationCommandArchetype( compilerBackend, config, cmdArchetype ) ){
+		error( "Failed to generate compilation command.\n" );
+		return BUILD_RESULT_FAILED;
+	}
+	
 	// compile step
 	// make .o files for all compilation units
 	// TODO(DM): 14/06/2025: embarrassingly parallel
@@ -413,8 +540,8 @@ static buildResult_t BuildBinary( buildContext_t* context, BuildConfig* config, 
 		if ( !ShouldRebuildSourceFile( sourceFile, intermediateFilename, sourceFileHashmapIndex ) ) {
 			continue;
 		}
-
-		if ( !compilerBackend->CompileSourceFile( compilerBackend, sourceFile, config ) ) {
+		
+		if ( !compilerBackend->CompileSourceFile( compilerBackend, context, config, cmdArchetype, sourceFile, generateCompilationDatabase ) ) {
 			error( "Compile failed.\n" );
 			return BUILD_RESULT_FAILED;
 		}
@@ -730,6 +857,67 @@ static bool8 WriteIncludeDependenciesFile( buildContext_t* context ) {
 	if ( !file_write_entire( includeDepsFilename, byteBuffer.data.data, byteBuffer.data.count ) ) {
 		errorCode_t errorCode = get_last_error_code();
 		error( "Failed to write file \"%s\".  Error code: " ERROR_CODE_FORMAT ".\n", includeDepsFilename, errorCode );
+		return false;
+	}
+
+	return true;
+}
+
+static bool WriteCompilationDatabase( const buildContext_t* context ) {
+	if ( context->compilationDatabase.empty() ) {
+		return true;
+	}
+
+	const char* outputFilename = tprintf( "%s%ccompile_commands.json", context->inputFilePath.data, PATH_SEPARATOR );
+
+	StringBuilder sb = {};
+	string_builder_reset( &sb );
+
+	string_builder_appendf( &sb, "[\n" );
+
+	For ( u64, i, 0, context->compilationDatabase.size() ) {
+		
+		const compilationDatabaseEntry_t& entry = context->compilationDatabase[i];
+
+		string_builder_appendf(
+			&sb,
+			"  {\n"
+			"    \"directory\": \"%s\",\n"
+			"    \"file\": \"%s\",\n"
+			"    \"arguments\": [\n",
+			entry.directory.c_str(),
+			entry.file.c_str()
+		);
+
+		For ( u64, argIndex, 0, entry.arguments.size() ) {
+			string_builder_appendf(
+				&sb,
+				"      \"%s\"%s\n",
+				entry.arguments[argIndex].c_str(),
+				( argIndex + 1 < entry.arguments.size() ) ? "," : ""
+			);
+		}
+
+		string_builder_appendf(
+			&sb,
+			"    ]\n"
+			"  }%s\n",
+			( i + 1 < context->compilationDatabase.size() ) ? "," : ""
+		);
+	}
+
+	string_builder_appendf( &sb, "]\n" );
+
+	const char* json = string_builder_to_string( &sb );
+	assert( json );
+
+	if ( !file_write_entire( outputFilename, json, strlen( json ) ) ) {
+		errorCode_t errorCode = get_last_error_code();
+		error(
+			"Failed to write compilation database \"%s\". Error code: " ERROR_CODE_FORMAT "\n",
+			outputFilename,
+			errorCode
+		);
 		return false;
 	}
 
@@ -1299,7 +1487,7 @@ int main( int argc, char** argv ) {
 		{
 			float64 buildTimeStart = time_ms();
 
-			buildResult_t buildResult = BuildBinary( &context, config, &compilerBackend );
+			buildResult_t buildResult = BuildBinary( &context, config, &compilerBackend, options.generate_compilation_database );
 
 			float64 buildTimeEnd = time_ms();
 
@@ -1336,6 +1524,11 @@ int main( int argc, char** argv ) {
 
 	if ( numSuccessfulBuilds > 0 && numFailedBuilds == 0 ) {
 		if ( !WriteIncludeDependenciesFile( &context ) ) {
+			QUIT_ERROR();
+		}
+
+		if ( options.generate_compilation_database && !WriteCompilationDatabase( &context ) ){
+			context.compilationDatabase.clear();
 			QUIT_ERROR();
 		}
 	}
