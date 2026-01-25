@@ -25,9 +25,6 @@ SOFTWARE.
 
 ===========================================================================
 */
-
-#include <complex>
-
 #include "builder_local.h"
 
 #include "core/include/debug.h"
@@ -191,13 +188,10 @@ static bool8 Clang_CompileSourceFile(
 	clangState_t* clangState = cast( clangState_t*, backend->data );
 
 	const char* sourceFileNoPath = path_remove_path_from_file( sourceFile );
-
 	const char* intermediatePath = tprintf( "%s%c%s", config->binary_folder.c_str(), PATH_SEPARATOR, INTERMEDIATE_PATH );
-	const char* intermediateFilename = tprintf( "%s%c%s.o", intermediatePath, PATH_SEPARATOR, sourceFileNoPath );
-
 	const char* depFilename = tprintf( "%s%c%s.d", intermediatePath, PATH_SEPARATOR, sourceFileNoPath );
 
-	Array<const char*>& finalArgs = cmdArchetype.baseArgs;
+	Array<const char*> finalArgs = cmdArchetype.baseArgs;
 
 	// Fill up remaining arguments
 	
@@ -205,25 +199,31 @@ static bool8 Clang_CompileSourceFile(
 	For( u64, flagIndex, 0, cmdArchetype.dependencyFlags.count) {
 		finalArgs.add( cmdArchetype.dependencyFlags[flagIndex] );
 	}
-	finalArgs.add( depFilename );
+	finalArgs.add( tprintf( "%s%c%s.d", intermediatePath, PATH_SEPARATOR, sourceFileNoPath ) );
 
 	// Output Flag/File
 	finalArgs.add( cmdArchetype.outputFlag );
-	finalArgs.add( intermediateFilename );
+	finalArgs.add( tprintf( "%s%c%s.o", intermediatePath, PATH_SEPARATOR, sourceFileNoPath ) );
 
 	// Source File
 	finalArgs.add( sourceFile );
 	
-	if ( recordCompilation ) {
-		RecordCompilationDatabaseEntry( buildContext, sourceFile, finalArgs );
+	//Array<const char*> intermediateArgs;
+	for(u64 i = 0; i < finalArgs.count; ++i )
+	{
+		assert( finalArgs[ i ] );
 	}
-
+	
 	s32 exitCode = RunProc( &finalArgs, NULL, PROC_FLAG_SHOW_ARGS | PROC_FLAG_SHOW_STDOUT );
 
 	if ( exitCode == 0 ) {
 		ReadDependencyFile( depFilename, clangState->includeDependencies );
 	}
 
+	if ( recordCompilation ) {
+		RecordCompilationDatabaseEntry( buildContext, sourceFile, finalArgs );
+	}
+	
 	return exitCode == 0;
 }
 
@@ -330,7 +330,7 @@ static bool8 Clang_GetCompilationCommandArchetype( const compilerBackend_t* back
 	// as we keep dependency flags, and the output flag separate
 	Array<const char*>& baseArgs = outCmdArchetype.baseArgs;
 	baseArgs.reserve(
-		1                       + // compilerPath
+		1                       + // compiler path
 		1                       + // compile flag
 		1                       + // lang version flag
 		1                       + // symbols flag
@@ -340,8 +340,8 @@ static bool8 Clang_GetCompilationCommandArchetype( const compilerBackend_t* back
 		1                       + // warning as error flag
 		1                       + // warning level flag
 		ignoredWarningsCount    +
-		additionalArgsCount )
-	;
+		additionalArgsCount     +
+		2 );                      // dependency flags
 
 	// Compiler Path
 	baseArgs.add( backend->compilerPath.data );
@@ -423,8 +423,8 @@ static bool8 Clang_GetCompilationCommandArchetype( const compilerBackend_t* back
 	}
 
 	// Dependency Flags
-	outCmdArchetype.dependencyFlags.add( "-MF" );
 	outCmdArchetype.dependencyFlags.add( "-MMD" );
+	outCmdArchetype.dependencyFlags.add( "-MF" );
 
 	// Output Flag
 	outCmdArchetype.outputFlag = "-o";

@@ -314,9 +314,7 @@ static bool8 MSVC_CompileSourceFile(
 	assert( config );
 
 	const char* sourceFileNoPath = path_remove_path_from_file( sourceFile );
-
 	const char* intermediatePath = tprintf( "%s%c%s", config->binary_folder.c_str(), PATH_SEPARATOR, INTERMEDIATE_PATH );
-	const char* intermediateFilename = tprintf( "%s%c%s.o", intermediatePath, PATH_SEPARATOR, sourceFileNoPath );
 
 	config->additional_includes.push_back( "." );
 
@@ -324,20 +322,16 @@ static bool8 MSVC_CompileSourceFile(
 
 	msvcState->includeDependencies.clear();
 
-	Array<const char*>& finalArgs = cmdArchetype.baseArgs;
+	Array<const char*> finalArgs = cmdArchetype.baseArgs;
 
 	// Fill up remaining arguments
 	
 	// Output Flag/File
 	finalArgs.add( cmdArchetype.outputFlag );
-	finalArgs.add( intermediateFilename );
+	finalArgs.add( tprintf( "%s%c%s.o", intermediatePath, PATH_SEPARATOR, sourceFileNoPath ) );
 
 	// Source File
 	finalArgs.add( sourceFile );
-
-	if ( recordCompilation ) {
-		RecordCompilationDatabaseEntry( buildContext, sourceFile, finalArgs );
-	}
 
 	// MSVC doesnt output include dependencies to .d files
 	// it only supports printing them to stdout
@@ -363,7 +357,7 @@ static bool8 MSVC_CompileSourceFile(
 		process_destroy( process );
 		process = NULL;
 	}
-
+	
 	// now parse the stdout
 	// all include dependencies are on their own line
 	// the line always starts with a specific prefix
@@ -406,6 +400,10 @@ static bool8 MSVC_CompileSourceFile(
 
 			lineStart = lineEnd + 1;
 		}
+	}
+	
+	if ( recordCompilation ) {
+		RecordCompilationDatabaseEntry( buildContext, sourceFile, finalArgs );
 	}
 
 	return exitCode == 0;

@@ -75,8 +75,6 @@ CORE_API const char*	path_canonicalise( const char* path );
 // Make sure that any slashes found in 'path' are what the OS expects them to be.
 CORE_API const char*	path_fix_slashes( const char* path );
 
-CORE_API const char*	path_fix_slashes_json( const char* path );
-
 CORE_API char*			path_relative_path_to( const char* pathFrom, const char* pathTo );
 
 CORE_API bool8			path_set_current_directory( const char* path );
