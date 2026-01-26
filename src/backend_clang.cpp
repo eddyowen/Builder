@@ -208,12 +208,6 @@ static bool8 Clang_CompileSourceFile(
 	// Source File
 	finalArgs.add( sourceFile );
 	
-	//Array<const char*> intermediateArgs;
-	for(u64 i = 0; i < finalArgs.count; ++i )
-	{
-		assert( finalArgs[ i ] );
-	}
-	
 	s32 exitCode = RunProc( &finalArgs, NULL, PROC_FLAG_SHOW_ARGS | PROC_FLAG_SHOW_STDOUT );
 
 	if ( exitCode == 0 ) {

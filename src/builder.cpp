@@ -759,6 +759,8 @@ void RecordCompilationDatabaseEntry(
 	entry.arguments.reserve( compilationCommandArray.count );
 	For( u64, argIndex, 0, compilationCommandArray.count ) {
 		const char* arg = compilationCommandArray[argIndex];
+		// The reason for this is because Core uses a thirdparty library under-the-hood in prcoess_create for subprocesses,
+		// which requires that the args list contains `NULL` at the end of the array, so we just insert one at the end so the user doesn't have to.
 		if ( !arg ) {
 			continue;
 		}
@@ -839,6 +841,8 @@ static void SanitizeCompilationDatabaseArgs( std::vector<std::string>& args ) {
 		const char* argPtr = arg.c_str();
 		
 		const flagRule_t *rule = IsFlagMatch( arg.c_str() );
+		
+		// Paths not related to compiler-scpecific flags
 		if (!rule) {
 			if ( path_is_absolute( argPtr ) || FileIsSourceFile( argPtr ) ) {
 				FixCompilatiomDatabasePath( arg );
