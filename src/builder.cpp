@@ -753,8 +753,8 @@ void RecordCompilationDatabaseEntry(
 	const Array<const char*>& compilationCommandArray ) {
 	
 	compilationDatabaseEntry_t entry;
-	entry.directory  = buildContext->inputFilePath.data;
-	entry.file       = sourceFileName;
+	entry.directory  = path_absolute_path( buildContext->inputFilePath.data );
+	entry.file       = path_absolute_path( sourceFileName );
 	
 	entry.arguments.reserve( compilationCommandArray.count );
 	For( u64, argIndex, 0, compilationCommandArray.count ) {
@@ -828,6 +828,7 @@ static void FixCompilatiomDatabasePath( std::string& path  ) {
 // Processes the compilation arguments and sanitizes those that are paths arguments, to follow the json format,
 // but following the possible combinations in which the compile flag can be provided, based on the compiler
 // (see flagRule_t). This was thought as a more optimal way of doing it, instead of checking character by character for each argument.
+// Also, AFAIK paths in compilation databases are expected to be full paths. 
 static void SanitizeCompilationDatabaseArgs( std::vector<std::string>& args ) {
 
 	For ( size_t, argIndex, 0, args.size() ) {
@@ -842,10 +843,12 @@ static void SanitizeCompilationDatabaseArgs( std::vector<std::string>& args ) {
 		
 		const flagRule_t *rule = IsFlagMatch( arg.c_str() );
 		
-		// Paths not related to compiler-scpecific flags
+		// Paths not related to compiler-specific flags
 		if (!rule) {
-			if ( path_is_absolute( argPtr ) || FileIsSourceFile( argPtr ) ) {
-				FixCompilatiomDatabasePath( arg );
+			if ( path_is_absolute( argPtr ) || FileIsSourceFile( argPtr ) || FileIsHeaderFile( argPtr) ) {
+				std::string path = path_absolute_path( arg.c_str() );
+				FixCompilatiomDatabasePath( path );
+				arg = std::move( path );
 			}
 
 			continue;
@@ -859,7 +862,7 @@ static void SanitizeCompilationDatabaseArgs( std::vector<std::string>& args ) {
 
 		// Joined form
 		if ( ( ruleForms & JOINED ) && argLength > ruleLength && arg.compare( 0, ruleLength, ruleFlag ) == 0 ) {
-			std::string path = arg.substr( ruleLength );
+			std::string path = path_absolute_path( arg.substr( ruleLength ).c_str() );
 			if ( !path.empty() ) {
 				FixCompilatiomDatabasePath( path );
 				arg = ruleFlag + path;
@@ -869,7 +872,7 @@ static void SanitizeCompilationDatabaseArgs( std::vector<std::string>& args ) {
 
 		// Colon form
 		if ( !handled && ( ruleForms & COLON ) && argLength > ruleLength && arg[ruleLength] == ':' ) {
-			std::string path = arg.substr( ruleLength + 1 );
+			std::string path = path_absolute_path( arg.substr( ruleLength + 1 ).c_str() );
 			FixCompilatiomDatabasePath( path );
 			arg = std::string( ruleFlag ) + ":" + path;
 			handled = true;
@@ -879,7 +882,9 @@ static void SanitizeCompilationDatabaseArgs( std::vector<std::string>& args ) {
 		if ( !handled && ( ruleForms & SEPARATE ) ) {
 			if ( argIndex + 1 < args.size() ) {
 				std::string& nextArg = args[++argIndex];
-				FixCompilatiomDatabasePath( nextArg );
+				std::string path = path_absolute_path( nextArg.c_str() );
+				FixCompilatiomDatabasePath( path );
+				nextArg = std::move( path );
 			}
 		}
 	}
