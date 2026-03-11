@@ -995,6 +995,7 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 	float64 setBuilderOptionsTimeMS = -1.0;
 	float64 compilerBackendInitTimeMS = -1.0;
 	float64 visualStudioGenerationTimeMS = -1.0;
+	float64 TenXEditorGenerationTimeMS = -1.0;
 
 	core_init( MEM_MEGABYTES( 128 ) );	// TODO(DM): 26/03/2025: can we just use defaults for this now?
 	defer( core_shutdown() );
@@ -1294,6 +1295,18 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 		printf( "Done.\n\n" );
 
 		visualStudioGenerationTimeMS = time_ms() - start;
+	} else if (options.generate10xWorkspace) {
+		float64 start = time_ms();
+
+		bool8 result = Generate10xWorkspace(&context, &options);
+		if ( !result ) {
+			error( "Failed to generate 10x Workspace.\n" );
+			QUIT_ERROR();
+		}
+
+		printf( "Done.\n\n" );
+
+		TenXEditorGenerationTimeMS = time_ms() - start;
 	} else {
 		// otherwise the user wants to actually build
 
@@ -1381,6 +1394,7 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 				);
 			}
 		}
+
 
 		std::vector<BuildConfig> configsToBuild;
 
@@ -1598,6 +1612,9 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 		}
 		if ( options.generateSolution && !isVisualStudioBuild ) {
 			printf( "    Generate solution:  %f ms\n", visualStudioGenerationTimeMS );
+		}
+		if ( options.generate10xWorkspace) {
+			printf( "    Generate 10x Workspace:  %f ms\n", TenXEditorGenerationTimeMS );
 		}
 		printf( "    Total time:         %f ms\n", time_ms() - totalTimeStart );
 		printf( "\n" );

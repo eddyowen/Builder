@@ -146,6 +146,8 @@ s32			RunProc( Array<const char *> *args, Array<const char *> *environmentVariab
 
 bool8		GenerateVisualStudioSolution( buildContext_t *context, BuilderOptions *options );
 
+bool8		Generate10xWorkspace( buildContext_t *context, BuilderOptions *options);
+
 inline u64 minull( const u64 x, const u64 y ) {
 	return ( x < y ) ? x : y;
 }

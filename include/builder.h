@@ -31,6 +31,7 @@ SOFTWARE.
 #include <vector>
 #include <string.h>
 #include <string>
+#include <unordered_map>
 
 #ifdef __linux__
 #include <cstring> // ctring is not a part of std string on linux and needs a manual include
@@ -213,6 +214,20 @@ struct VisualStudioSolution {
 	std::string							path;
 };
 
+enum class ProjectType
+{
+	PROJECT_TYPE_UNSET = 0,
+	PROJECT_TYPE_10X
+};
+
+struct EditorProjectDefinition
+{
+	ProjectType type = ProjectType::PROJECT_TYPE_UNSET;
+
+	std::string outputPath;
+	std::unordered_map<std::string, std::vector<std::string>> additionalSettings;
+};
+
 struct BuilderOptions {
 	// The path to the compiler that you want to build with.
 	// If you want to use MSVC then you can just set this to "cl.exe" or "cl" and set 'compilerVersion' and Builder will figure it out for you.
@@ -234,6 +249,8 @@ struct BuilderOptions {
 	// If you don't use Visual Studio then ignore this.
 	VisualStudioSolution		solution;
 
+	EditorProjectDefinition 	projectDefinition{};
+
 	// Set this to true if you want Builder to force-rebuild your program.
 	// All binaries and intermediate files will get rebuilt.
 	// This is really only useful to those who are either using an editor + command line workflow, or just hate incremental builds.
@@ -248,6 +265,11 @@ struct BuilderOptions {
 	// If this is set to true, then a code build will NOT happen.
 	// If you don't use Visual Studio then ignore this.
 	bool						generateSolution;
+
+    // Do you want to generate a Visual Studio solution?
+	// If this is set to true, then a code build will NOT happen.
+	// If you don't use Visual Studio then ignore this.
+	bool						generate10xWorkspace;
 
 	// Do you want to generate a compilation_commands.json for Clang tooling?
 	// If true, the file will be generated IF the build is successful.
