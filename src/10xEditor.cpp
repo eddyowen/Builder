@@ -55,59 +55,55 @@ constexpr std::string_view BoolToString(const bool8 value)
 }
 
 #ifdef _WIN32
-struct FileDataBuffer {
-	Array<u8>	data;
-	u64			readOffset;
-};
 
 struct WindowsSDK {
-    std::string path;
-    std::string version;
+	std::string path;
+	std::string version;
 };
 
 static std::vector<int> ParseWindowsSDKVersion(const std::string& version) {
-    std::vector<int> parts;
-    std::stringstream ss(version);
-    std::string part;
-    while (std::getline(ss, part, '.'))
-        parts.push_back(std::stoi(part));
-    return parts;
+	std::vector<int> parts;
+	std::stringstream ss(version);
+	std::string part;
+	while (std::getline(ss, part, '.'))
+		parts.push_back(std::stoi(part));
+	return parts;
 }
 
 static bool IsNewerVersion(const WindowsSDK& a, const WindowsSDK& b) {
-    auto partsA = ParseWindowsSDKVersion(a.version);
-    auto partsB = ParseWindowsSDKVersion(b.version);
-    return partsA > partsB;
+	auto partsA = ParseWindowsSDKVersion(a.version);
+	auto partsB = ParseWindowsSDKVersion(b.version);
+	return partsA > partsB;
 }
 #endif
 
 static std::vector<WindowsSDK> GetInstalledSDKs() {
 #ifdef _WIN32
-    HKEY rootKey;
-    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, R"(SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots)", 0, KEY_READ, &rootKey) != ERROR_SUCCESS)
-        return {};
+	HKEY rootKey;
+	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, R"(SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots)", 0, KEY_READ, &rootKey) != ERROR_SUCCESS)
+		return {};
 
-    // Read the root path ONCE from the root key
-    char rootPath[MAX_PATH];
-    DWORD pathSize = sizeof(rootPath);
+	// Read the root path ONCE from the root key
+	char rootPath[MAX_PATH];
+	DWORD pathSize = sizeof(rootPath);
 
 	// No SDK root found
-    if (RegQueryValueExA(rootKey, "KitsRoot10", nullptr, nullptr, (LPBYTE)rootPath, &pathSize) != ERROR_SUCCESS) {
-        RegCloseKey(rootKey);
-        return {};
-    }
+	if (RegQueryValueExA(rootKey, "KitsRoot10", nullptr, nullptr, (LPBYTE)rootPath, &pathSize) != ERROR_SUCCESS) {
+		RegCloseKey(rootKey);
+		return {};
+	}
 
-    std::vector<WindowsSDK> sdks;
-    char versionName[64];
-    DWORD index = 0, nameSize = sizeof(versionName);
+	std::vector<WindowsSDK> sdks;
+	char versionName[64];
+	DWORD index = 0, nameSize = sizeof(versionName);
 
-    while (RegEnumKeyExA(rootKey, index++, versionName, &nameSize, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
-        sdks.push_back({ rootPath, versionName });
-        nameSize = sizeof(versionName);
-    }
+	while (RegEnumKeyExA(rootKey, index++, versionName, &nameSize, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
+		sdks.push_back({ rootPath, versionName });
+		nameSize = sizeof(versionName);
+	}
 
-    RegCloseKey(rootKey);
-    return sdks;
+	RegCloseKey(rootKey);
+	return sdks;
 #else
 	return {};
 #endif
@@ -148,17 +144,17 @@ bool8 Generate10xWorkspace( buildContext_t *context, BuilderOptions *options ) {
 
 	const Ten10xWorkspace& workspace = options->tenXWorkspace;
 
-	const std::string& outputPath 		= workspace.outputPath;
-	const std::string& includeFilter 	= workspace.includeFilter.empty() ? DefaultIncludeFilter : workspace.includeFilter;
-	const std::string& excludeFilter 	= workspace.excludeFilter.empty() ? DefaultExcludeFilter : workspace.excludeFilter;
+	const std::string& outputPath		 = workspace.outputPath;
+	const std::string& includeFilter	 = workspace.includeFilter.empty() ? DefaultIncludeFilter : workspace.includeFilter;
+	const std::string& excludeFilter	 = workspace.excludeFilter.empty() ? DefaultExcludeFilter : workspace.excludeFilter;
 
-	const bool8 isFolder 				= workspace.isFolder;
-	const bool8 includeFilesWithoutExt 	= workspace.includeFilesWithoutExt;
-	const bool8 syncFiles 				= workspace.syncFiles;
-	const bool8 recursive 				= workspace.recursive;
-	const bool8 showEmptyFolders 		= workspace.showEmptyFolders;
-	const bool8 useVisualStudioEnvBat 	= workspace.useVisualStudioEnvBat;
-	const bool8 captureExeOutput 		= workspace.captureExeOutput;
+	const bool8 isFolder				 = workspace.isFolder;
+	const bool8 includeFilesWithoutExt	 = workspace.includeFilesWithoutExt;
+	const bool8 syncFiles				 = workspace.syncFiles;
+	const bool8 recursive				 = workspace.recursive;
+	const bool8 showEmptyFolders		 = workspace.showEmptyFolders;
+	const bool8 useVisualStudioEnvBat	 = workspace.useVisualStudioEnvBat;
+	const bool8 captureExeOutput		 = workspace.captureExeOutput;
 
 	const char *workspacePath = NULL;
 	const char* inputFilePath = context->inputFilePath.data;
@@ -183,13 +179,13 @@ bool8 Generate10xWorkspace( buildContext_t *context, BuilderOptions *options ) {
 	string_builder_appendf( &workspaceContent, "\t\t<IncludeFilter>%s</IncludeFilter>\n", includeFilter.c_str() );
 	string_builder_appendf( &workspaceContent, "\t\t<ExcludeFilter>%s</ExcludeFilter>\n", excludeFilter.c_str() );
 
-	string_builder_appendf( &workspaceContent, "\t\t<IsFolder>%s</IsFolder>\n", 							BoolToString( isFolder ).data() );
+	string_builder_appendf( &workspaceContent, "\t\t<IsFolder>%s</IsFolder>\n",							 BoolToString( isFolder ).data() );
 	string_builder_appendf( &workspaceContent, "\t\t<IncludeFilesWithoutExt>%s</IncludeFilesWithoutExt>\n", BoolToString( includeFilesWithoutExt ).data() );
-	string_builder_appendf( &workspaceContent, "\t\t<SyncFiles>%s</SyncFiles>\n", 							BoolToString( syncFiles ).data() );
-	string_builder_appendf( &workspaceContent, "\t\t<Recursive>%s</Recursive>\n", 							BoolToString( recursive ).data() );
-	string_builder_appendf( &workspaceContent, "\t\t<ShowEmptyFolders>%s</ShowEmptyFolders>\n", 			BoolToString( showEmptyFolders ).data() );
-	string_builder_appendf( &workspaceContent, "\t\t<UseVisualStudioEnvBat>%s</UseVisualStudioEnvBat>\n", 	BoolToString( useVisualStudioEnvBat ).data() );
-	string_builder_appendf( &workspaceContent, "\t\t<CaptureExeOutput>%s</CaptureExeOutput>\n", 			BoolToString( captureExeOutput ).data() );
+	string_builder_appendf( &workspaceContent, "\t\t<SyncFiles>%s</SyncFiles>\n",							 BoolToString( syncFiles ).data() );
+	string_builder_appendf( &workspaceContent, "\t\t<Recursive>%s</Recursive>\n",							 BoolToString( recursive ).data() );
+	string_builder_appendf( &workspaceContent, "\t\t<ShowEmptyFolders>%s</ShowEmptyFolders>\n",			 BoolToString( showEmptyFolders ).data() );
+	string_builder_appendf( &workspaceContent, "\t\t<UseVisualStudioEnvBat>%s</UseVisualStudioEnvBat>\n",	 BoolToString( useVisualStudioEnvBat ).data() );
+	string_builder_appendf( &workspaceContent, "\t\t<CaptureExeOutput>%s</CaptureExeOutput>\n",			 BoolToString( captureExeOutput ).data() );
 
 	// ===============================================================================================================
 	// Configs
