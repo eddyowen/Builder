@@ -82,8 +82,12 @@ static bool8 create_folder_internal( const char* path ) {
 
 //================================================================
 
-File file_open( const char* filename ) {
+File file_open( const char* filename, bool8 read_only ) {
 	assert( filename );
+
+	if (read_only) {
+		return open_file_internal( filename, GENERIC_READ, OPEN_EXISTING );
+	} 
 
 	return open_file_internal( filename, GENERIC_READ | GENERIC_WRITE, OPEN_EXISTING );
 }

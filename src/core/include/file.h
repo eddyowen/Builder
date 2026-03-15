@@ -67,7 +67,7 @@ typedef void ( *FileVisitCallback )( const FileInfo* file_info, void* user_data 
 
 
 // Opens the file for reading and writing.
-CORE_API File	file_open( const char* filename );
+CORE_API File	file_open( const char* filename, bool8 read_only = false );
 
 // If the file exists then opens it for reading and writing, otherwise creates it and then opens it.
 CORE_API File	file_open_or_create( const char* filename, const bool8 keep_existing_content = false );
@@ -88,7 +88,7 @@ CORE_API void	file_free_buffer( char** buffer );
 // Returns number of bytes read if successful, otherwise returns 0, the out buffer stays null, and out_file_length doesn't get written to.
 // Storing 'out_file_length' is optional.
 // Call "file_free_buffer()" to release the memory read into the out buffer.
-CORE_API bool8	file_read_entire( const char* filename, char** out_buffer, u64* out_file_length = NULL );
+CORE_API bool8	file_read_entire( const char* filename, char** out_buffer, u64* out_file_length = NULL, bool8 read_only = false );
 
 // Returns true if 'size' bytes was successfully read from the file starting from it's current offset and puts the result into 'out_data', otherwise returns false and the out buffer stays null.
 CORE_API bool8	file_read( File* file, const u64 size, void* out_data );

@@ -48,7 +48,7 @@ void file_free_buffer( char** buffer ) {
 	*buffer = NULL;
 }
 
-bool8 file_read_entire( const char* filename, char** outBuffer, u64* out_file_length ) {
+bool8 file_read_entire( const char* filename, char** outBuffer, u64* out_file_length, bool8 read_only ) {
 	assertf( filename, "Specified file name to read from cannot be null." );
 	assertf( !*outBuffer, "Specified out-buffer MUST be null because this function news it." );
 
@@ -63,7 +63,7 @@ bool8 file_read_entire( const char* filename, char** outBuffer, u64* out_file_le
 		return false;
 	}
 
-	File file = file_open( filename );
+	File file = file_open( filename, read_only );
 
 	if ( file.handle == INVALID_FILE_HANDLE ) {
 		return 0;
