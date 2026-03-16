@@ -214,11 +214,15 @@ struct VisualStudioSolution {
 	std::string							path;
 };
 
-struct Ten10xWorkspace
+struct TenxPlatorm {
+	std::string name;
+	std::vector<std::string> defines;
+};
+
+struct TenxWorkspace
 {
-	std::vector<std::string> platforms;
+	std::vector<TenxPlatorm> platforms;
 	
-	// @ZenonTodo-Ed - revise if this is needed or we do have some from builder we can use for it
 	std::string outputPath;
 
 	std::string includeFilter;
@@ -255,7 +259,7 @@ struct BuilderOptions {
 	VisualStudioSolution		solution;
 
 	// Struct that holds additional used to generate 10x Editor Workspaces. Ignored if 'generateCompilationDatabase' flag is set to 'false'.
-	Ten10xWorkspace 			tenXWorkspace{};
+	TenxWorkspace 			tenXWorkspace;
 
 	// Set this to true if you want Builder to force-rebuild your program.
 	// All binaries and intermediate files will get rebuilt.

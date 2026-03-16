@@ -142,7 +142,7 @@ bool8 Generate10xWorkspace( buildContext_t *context, BuilderOptions *options ) {
 	assert( context->inputFilePath.data );
 	assert( options );
 
-	const Ten10xWorkspace& workspace = options->tenXWorkspace;
+	const TenxWorkspace& workspace = options->tenXWorkspace;
 
 	const std::string& outputPath		 = workspace.outputPath;
 	const std::string& includeFilter	 = workspace.includeFilter.empty() ? DefaultIncludeFilter : workspace.includeFilter;
@@ -206,7 +206,7 @@ bool8 Generate10xWorkspace( buildContext_t *context, BuilderOptions *options ) {
 	// Platforms
 	// ===============================================================================================================
 
-	const std::vector<std::string>& platforms = workspace.platforms;
+	const std::vector<TenxPlatorm>& platforms = workspace.platforms;
 	string_builder_appendf( &workspaceContent, "\t\t<Platforms>\n" );
 	// @NOTE-Ed - Default to x64 if not platforms provided
 	if (platforms.size() == 0) {
@@ -214,7 +214,7 @@ bool8 Generate10xWorkspace( buildContext_t *context, BuilderOptions *options ) {
 	} else {
 		For (u64, platformIndex, 0, platforms.size()) {
 			string_builder_appendf( &workspaceContent, "\t\t\t<Platform>" );
-			string_builder_appendf( &workspaceContent, platforms[platformIndex].c_str() );
+			string_builder_appendf( &workspaceContent, platforms[platformIndex].name.c_str() );
 			string_builder_appendf( &workspaceContent, "</Platform>\n" );
 		}
 	}
