@@ -84,6 +84,13 @@ enum OptimizationLevel {
 	OPTIMIZATION_LEVEL_O3,
 };
 
+enum Compiler {
+	COMPILER_DEFAULT = 0,
+	COMPILER_CLANG,
+	COMPILER_GCC, 
+	COMPILER_MSVC
+};
+
 struct BuildConfig {
 	// The other BuildConfigs that this build needs to have happened first.
 	std::vector<BuildConfig>	dependsOn;
@@ -215,26 +222,30 @@ struct VisualStudioSolution {
 };
 
 struct TenxPlatorm {
-	std::string name;
-	std::vector<std::string> defines;
+	std::string 				name;
+	std::vector<std::string> 	defines;
+};
+
+struct TenxCompiler {
+	Compiler 					id;
+	std::vector<std::string> 	defines;
 };
 
 struct TenxWorkspace
 {
-	std::vector<TenxPlatorm> platforms;
-	
-	std::string outputPath;
-
-	std::string includeFilter;
-	std::string excludeFilter;
-
-	bool isFolder 				= false;
-	bool includeFilesWithoutExt = false;
-	bool syncFiles 				= true;
-	bool recursive 				= true;
-	bool showEmptyFolders 		= true;
-	bool useVisualStudioEnvBat 	= true;
-	bool captureExeOutput 		= true;
+	std::vector<TenxPlatorm> 	platforms;
+	std::vector<TenxCompiler> 	compilers;
+	std::vector<std::string> 	globalDefines;
+	std::string 				outputPath;
+	std::string 				includeFilter;
+	std::string 				excludeFilter;
+	bool 						isFolder 				= false;
+	bool 						includeFilesWithoutExt  = false;
+	bool 						syncFiles 				= true;
+	bool 						recursive 				= true;
+	bool 						showEmptyFolders 		= true;
+	bool 						useVisualStudioEnvBat 	= true;
+	bool 						captureExeOutput 		= true;
 };
 
 struct BuilderOptions {
@@ -259,7 +270,7 @@ struct BuilderOptions {
 	VisualStudioSolution		solution;
 
 	// Struct that holds additional used to generate 10x Editor Workspaces. Ignored if 'generateCompilationDatabase' flag is set to 'false'.
-	TenxWorkspace 			tenXWorkspace;
+	TenxWorkspace 				tenxWorkspace;
 
 	// Set this to true if you want Builder to force-rebuild your program.
 	// All binaries and intermediate files will get rebuilt.

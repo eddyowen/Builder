@@ -988,6 +988,38 @@ static bool WriteCompilationDatabase( buildContext_t *context ) {
 	return true;
 }
 
+Compiler GetCompiler( buildContext_t *context, BuilderOptions *options ) {
+	assert( context );
+	assert( options );
+
+	const std::string& compilerPath = options->compilerPath;
+	if ( compilerPath.empty() ) {
+		return Compiler::COMPILER_DEFAULT;
+	}
+
+	std::string path = compilerPath;
+
+	if ( string_ends_with( path.c_str(), ".exe" ) ) {
+		path = path_remove_file_extension( path.c_str() );
+	}
+
+	path = path_remove_file_from_path( path.c_str() );
+
+	if ( !path_is_absolute( path.c_str() ) ) {
+		path = std::string( context->inputFilePath.data ) + "/" + path;
+	}
+
+	if ( string_ends_with( path.c_str(), "clang" ) || string_ends_with( path.c_str(), "clang++" ) ) {
+		return Compiler::COMPILER_CLANG;
+	} else if ( string_ends_with( path.c_str(), "gcc" ) || string_ends_with( path.c_str(), "g++" ) ) {
+		return Compiler::COMPILER_GCC;
+	} else if ( string_ends_with( path.c_str(), "cl" ) ) {
+		return Compiler::COMPILER_MSVC;
+	}
+
+	return Compiler::COMPILER_DEFAULT;
+}
+
 int BuilderMain( const int firstArg, int argc, char **argv ) {
 	float64 totalTimeStart = time_ms();
 

@@ -37,10 +37,11 @@
 #include "core/include/paths.h"
 
 #include <string>
+#include <functional>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <sstream>
-#include <algorithm>
 #include <unordered_set>
 #endif
 
@@ -136,127 +137,174 @@ static std::string GetVisualStudioInstallationPath()
 	return vsInstallationPath;
 }
 
-bool8 Generate10xWorkspace( buildContext_t *context, BuilderOptions *options ) {
-	assert( context );
-	assert( context->inputFile );
-	assert( context->inputFilePath.data );
-	assert( options );
+using ConfigFieldAccessor = std::function<const std::vector<std::string>&(const BuildConfig&)>;
 
-	const TenxWorkspace& workspace = options->tenXWorkspace;
+static void AppendUniqueFieldsFromConfigs(
+	StringBuilder* stringBuilder,
+	const std::vector<BuildConfig>& buildConfigs,
+	const char* fieldTag,
+	const ConfigFieldAccessor& getField
+) {
+	std::unordered_set<std::string> uniqueEntries;
+	for (const BuildConfig& config : buildConfigs) {
+		const auto& field = getField(config);
+		uniqueEntries.insert(field.begin(), field.end());
+	}
 
-	const std::string& outputPath		 = workspace.outputPath;
-	const std::string& includeFilter	 = workspace.includeFilter.empty() ? DefaultIncludeFilter : workspace.includeFilter;
-	const std::string& excludeFilter	 = workspace.excludeFilter.empty() ? DefaultExcludeFilter : workspace.excludeFilter;
+	for (const std::string& entry : uniqueEntries) {
+		string_builder_appendf(stringBuilder, "\t\t\t<%s>%s</%s>\n", fieldTag, entry.c_str(), fieldTag);
+	}
+}
 
-	const bool8 isFolder				 = workspace.isFolder;
-	const bool8 includeFilesWithoutExt	 = workspace.includeFilesWithoutExt;
-	const bool8 syncFiles				 = workspace.syncFiles;
-	const bool8 recursive				 = workspace.recursive;
-	const bool8 showEmptyFolders		 = workspace.showEmptyFolders;
-	const bool8 useVisualStudioEnvBat	 = workspace.useVisualStudioEnvBat;
-	const bool8 captureExeOutput		 = workspace.captureExeOutput;
+static void AppendUniqueFieldsFromList( StringBuilder* stringBuilder, const std::vector<std::string>& list, const char* fieldTag ) {
+	if ( list.begin() == list.end() ) {
+		return;
+	}
+
+	std::unordered_set<std::string> uniqueEntries;
+	uniqueEntries.insert(list.begin(), list.end());
+
+	for (const std::string& entry : uniqueEntries) {
+		string_builder_appendf(stringBuilder, "\t\t\t<%s>%s</%s>\n", fieldTag, entry.c_str(), fieldTag);
+	}
+}
+
+static const std::vector<std::string> GetUserCompilerDefines(const TenxWorkspace& workspace, Compiler compiler) {
+	const std::vector<TenxCompiler>& compilers = workspace.compilers;
+	auto it = std::find_if(compilers.begin(), compilers.end(), [&compiler](const TenxCompiler& lhs) {
+		return lhs.id == compiler;
+	});
+
+	if (it != compilers.end()) {
+		return it->defines;
+	}
+
+	return {};
+}
+
+bool8 Generate10xWorkspace(buildContext_t *context, BuilderOptions *options) {
+	assert(context);
+	assert(context->inputFile);
+	assert(context->inputFilePath.data);
+	assert(options);
+
+	const std::vector<BuildConfig>& buildConfigs  = options->configs;
+
+	const TenxWorkspace& workspace 				  = options->tenxWorkspace;
+
+	const std::string& outputPath 				  = workspace.outputPath;
+	const std::string& includeFilter 			  = workspace.includeFilter.empty() ? DefaultIncludeFilter : workspace.includeFilter;
+	const std::string& excludeFilter 			  = workspace.excludeFilter.empty() ? DefaultExcludeFilter : workspace.excludeFilter;
+
+	const std::vector<TenxPlatorm>& platforms 	  = workspace.platforms;
+	const std::vector<std::string>& globalDefines = workspace.globalDefines;
+
+	const bool8 isFolder 						  = workspace.isFolder;
+	const bool8 includeFilesWithoutExt 			  = workspace.includeFilesWithoutExt;
+	const bool8 syncFiles 						  = workspace.syncFiles;
+	const bool8 recursive 						  = workspace.recursive;
+	const bool8 showEmptyFolders 				  = workspace.showEmptyFolders;
+	const bool8 useVisualStudioEnvBat 			  = workspace.useVisualStudioEnvBat;
+	const bool8 captureExeOutput 				  = workspace.captureExeOutput;
 
 	const char *workspacePath = NULL;
 	const char* inputFilePath = context->inputFilePath.data;
-	if ( !outputPath.c_str() ) {
-		workspacePath = tprintf( "%s%c%s%stest.10x", inputFilePath, PATH_SEPARATOR, outputPath.c_str(), PATH_SEPARATOR );
+	if (!outputPath.c_str()) {
+		workspacePath = tprintf("%s%c%s%stest.10x", inputFilePath, PATH_SEPARATOR, outputPath.c_str(), PATH_SEPARATOR);
 	} else {
-		workspacePath = tprintf( "%s%cstest.10x", inputFilePath, PATH_SEPARATOR );
+		workspacePath = tprintf("%s%cstest.10x", inputFilePath, PATH_SEPARATOR);
 	}
 
 	StringBuilder workspaceContent = {};
-	string_builder_reset( &workspaceContent );
-	defer( string_builder_destroy( &workspaceContent ) );
+	string_builder_reset(&workspaceContent);
+	defer(string_builder_destroy(&workspaceContent));
 
-	string_builder_appendf( &workspaceContent, "<?xml version=\"1.0\"?>\n" );
-	string_builder_appendf( &workspaceContent, "<N10X>\n" );
-	string_builder_appendf( &workspaceContent, "\t<Workspace>\n" );
+	string_builder_appendf(&workspaceContent, "<?xml version=\"1.0\"?>\n");
+	string_builder_appendf(&workspaceContent, "<N10X>\n");
+	string_builder_appendf(&workspaceContent, "\t<Workspace>\n");
 
 	// ===============================================================================================================
 	// Filters
 	// ===============================================================================================================
 
-	string_builder_appendf( &workspaceContent, "\t\t<IncludeFilter>%s</IncludeFilter>\n", includeFilter.c_str() );
-	string_builder_appendf( &workspaceContent, "\t\t<ExcludeFilter>%s</ExcludeFilter>\n", excludeFilter.c_str() );
+	string_builder_appendf(&workspaceContent, "\t\t<IncludeFilter>%s</IncludeFilter>\n", includeFilter.c_str());
+	string_builder_appendf(&workspaceContent, "\t\t<ExcludeFilter>%s</ExcludeFilter>\n", excludeFilter.c_str());
 
-	string_builder_appendf( &workspaceContent, "\t\t<IsFolder>%s</IsFolder>\n",							 BoolToString( isFolder ).data() );
-	string_builder_appendf( &workspaceContent, "\t\t<IncludeFilesWithoutExt>%s</IncludeFilesWithoutExt>\n", BoolToString( includeFilesWithoutExt ).data() );
-	string_builder_appendf( &workspaceContent, "\t\t<SyncFiles>%s</SyncFiles>\n",							 BoolToString( syncFiles ).data() );
-	string_builder_appendf( &workspaceContent, "\t\t<Recursive>%s</Recursive>\n",							 BoolToString( recursive ).data() );
-	string_builder_appendf( &workspaceContent, "\t\t<ShowEmptyFolders>%s</ShowEmptyFolders>\n",			 BoolToString( showEmptyFolders ).data() );
-	string_builder_appendf( &workspaceContent, "\t\t<UseVisualStudioEnvBat>%s</UseVisualStudioEnvBat>\n",	 BoolToString( useVisualStudioEnvBat ).data() );
-	string_builder_appendf( &workspaceContent, "\t\t<CaptureExeOutput>%s</CaptureExeOutput>\n",			 BoolToString( captureExeOutput ).data() );
+	string_builder_appendf(&workspaceContent, "\t\t<IsFolder>%s</IsFolder>\n",							 	BoolToString(isFolder).data());
+	string_builder_appendf(&workspaceContent, "\t\t<IncludeFilesWithoutExt>%s</IncludeFilesWithoutExt>\n", BoolToString(includeFilesWithoutExt).data());
+	string_builder_appendf(&workspaceContent, "\t\t<SyncFiles>%s</SyncFiles>\n",							BoolToString(syncFiles).data());
+	string_builder_appendf(&workspaceContent, "\t\t<Recursive>%s</Recursive>\n",							BoolToString(recursive).data());
+	string_builder_appendf(&workspaceContent, "\t\t<ShowEmptyFolders>%s</ShowEmptyFolders>\n",				BoolToString(showEmptyFolders).data());
+	string_builder_appendf(&workspaceContent, "\t\t<UseVisualStudioEnvBat>%s</UseVisualStudioEnvBat>\n",	BoolToString(useVisualStudioEnvBat).data());
+	string_builder_appendf(&workspaceContent, "\t\t<CaptureExeOutput>%s</CaptureExeOutput>\n",				BoolToString(captureExeOutput).data());
 
 	// ===============================================================================================================
 	// Configs
 	// ===============================================================================================================
 
-	string_builder_appendf( &workspaceContent, "\t\t<Configurations>\n" );
+	string_builder_appendf(&workspaceContent, "\t\t<Configurations>\n");
 	For (u64, configIndex, 0, options->configs.size()) {
 		BuildConfig& config = options->configs[configIndex];
-		string_builder_appendf( &workspaceContent, "\t\t\t<Configuration>" );
-		string_builder_appendf( &workspaceContent, config.name.c_str() );
-		string_builder_appendf( &workspaceContent, "</Configuration>\n" );
-
-
+		string_builder_appendf(&workspaceContent, "\t\t\t<Configuration>");
+		string_builder_appendf(&workspaceContent, config.name.c_str());
+		string_builder_appendf(&workspaceContent, "</Configuration>\n");
 	}
-	string_builder_appendf( &workspaceContent, "\t\t</Configurations>\n" );
+	string_builder_appendf(&workspaceContent, "\t\t</Configurations>\n");
 
 	// ===============================================================================================================
 	// Platforms
 	// ===============================================================================================================
 
-	const std::vector<TenxPlatorm>& platforms = workspace.platforms;
-	string_builder_appendf( &workspaceContent, "\t\t<Platforms>\n" );
+	string_builder_appendf(&workspaceContent, "\t\t<Platforms>\n");
 	// @NOTE-Ed - Default to x64 if not platforms provided
 	if (platforms.size() == 0) {
-		string_builder_appendf( &workspaceContent, "\t\t\t<Platform>x64</Platform>\n" );
+		string_builder_appendf(&workspaceContent, "\t\t\t<Platform>x64</Platform>\n");
 	} else {
 		For (u64, platformIndex, 0, platforms.size()) {
-			string_builder_appendf( &workspaceContent, "\t\t\t<Platform>" );
-			string_builder_appendf( &workspaceContent, platforms[platformIndex].name.c_str() );
-			string_builder_appendf( &workspaceContent, "</Platform>\n" );
+			string_builder_appendf(&workspaceContent, "\t\t\t<Platform>");
+			string_builder_appendf(&workspaceContent, platforms[platformIndex].name.c_str());
+			string_builder_appendf(&workspaceContent, "</Platform>\n");
 		}
 	}
-	string_builder_appendf( &workspaceContent, "\t\t</Platforms>\n" );
+	string_builder_appendf(&workspaceContent, "\t\t</Platforms>\n");
 
 	// ===============================================================================================================
 	// Additional Includes
 	// ===============================================================================================================
 
-	string_builder_appendf( &workspaceContent, "\t\t<AdditionalIncludePaths>\n" );
+	string_builder_appendf(&workspaceContent, "\t\t<AdditionalIncludePaths>\n");
 
 	const std::string vsInstallationPath = GetVisualStudioInstallationPath();
-	if ( !vsInstallationPath.empty() ) {
-		char* fileContent;
+	if (!vsInstallationPath.empty()) {
+		char* fileContent = nullptr;
 		u64 fileLength;
 
 		const char* vsToolsVersionRelativePath = R"(VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt)";
-		const char* toolsVersionFilename = tprintf( "%s%c%s", vsInstallationPath.c_str(), PATH_SEPARATOR, vsToolsVersionRelativePath );
+		const char* toolsVersionFilename = tprintf("%s%c%s", vsInstallationPath.c_str(), PATH_SEPARATOR, vsToolsVersionRelativePath);
 
-		if ( file_read_entire( toolsVersionFilename, &fileContent, &fileLength, true ) ) {
+		if (file_read_entire(toolsVersionFilename, &fileContent, &fileLength, true)) {
 			// Safe as VCToolsVersion.default.txt always contains only 1 entry
-			std::string msvcVersion = std::string( fileContent ).substr( 0, strlen( fileContent ) - strlen( "\r\n" ) );
+			std::string msvcVersion = std::string(fileContent).substr(0, strlen(fileContent) - strlen("\r\n"));
 
-			string_builder_appendf( 
-				&workspaceContent, 
-				"\t\t\t<AdditionalIncludePath>%s%c%s%c%s%c%s</AdditionalIncludePath>\n", 
-				vsInstallationPath.c_str(), 
-				PATH_SEPARATOR, 
-				path_canonicalise("VC/Tools/MSVC"), 
-				PATH_SEPARATOR, 
-				msvcVersion.c_str(), 
-				PATH_SEPARATOR, 
+			string_builder_appendf(
+				&workspaceContent,
+				"\t\t\t<AdditionalIncludePath>%s%c%s%c%s%c%s</AdditionalIncludePath>\n",
+				vsInstallationPath.c_str(),
+				PATH_SEPARATOR,
+				path_canonicalise("VC/Tools/MSVC"),
+				PATH_SEPARATOR,
+				msvcVersion.c_str(),
+				PATH_SEPARATOR,
 				"include"
 			);
 
-			string_builder_appendf( &workspaceContent, "\t\t\t<AdditionalIncludePath>%s%c%s</AdditionalIncludePath>\n", vsInstallationPath.c_str(), PATH_SEPARATOR, path_canonicalise( "VC/Auxiliary/VS/include" ) );
+			string_builder_appendf(&workspaceContent, "\t\t\t<AdditionalIncludePath>%s%c%s</AdditionalIncludePath>\n", vsInstallationPath.c_str(), PATH_SEPARATOR, path_canonicalise("VC/Auxiliary/VS/include"));
 		}
 	}
 
 	// Windows SDK include paths (if any)
 	std::vector<WindowsSDK> windowsSDKs = GetInstalledSDKs();
-	if (windowsSDKs.size() > 0 ) {
+	if (windowsSDKs.size() > 0) {
 		std::sort(windowsSDKs.begin(), windowsSDKs.end(), IsNewerVersion);
 		// Use the latest installation only
 		const WindowsSDK& sdk = windowsSDKs[0];
@@ -265,55 +313,57 @@ bool8 Generate10xWorkspace( buildContext_t *context, BuilderOptions *options ) {
 		
 		const char* additionalIncludeFmt = "\t\t\t<AdditionalIncludePath>%s%s%c%s%c%s</AdditionalIncludePath>\n";
 		// sdk.path.c_str() here already contains the trailing "\", so no PATH_SEPARATOR needed
-		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "ucrt" );
-		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "um" );
-		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "shared" );
-		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "cppwinrt" );
+		string_builder_appendf(&workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "ucrt");
+		string_builder_appendf(&workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "um");
+		string_builder_appendf(&workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "shared");
+		string_builder_appendf(&workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "cppwinrt");
 	}
 
-	const char* builderIncludePath = tprintf( "%s%c..%cinclude", path_remove_file_from_path( path_app_path() ), PATH_SEPARATOR, PATH_SEPARATOR );
-	string_builder_appendf( &workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", builderIncludePath );
+	const char* builderIncludePath = tprintf("%s%c..%cinclude", path_remove_file_from_path(path_app_path()), PATH_SEPARATOR, PATH_SEPARATOR);
+	string_builder_appendf(&workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", builderIncludePath);
 	
-	const char* builderClangIncludePath = tprintf( "%s%c..%cclang%cinclude", path_remove_file_from_path( path_app_path() ), PATH_SEPARATOR, PATH_SEPARATOR, PATH_SEPARATOR );
-	string_builder_appendf( &workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", builderClangIncludePath );
+	const char* builderClangIncludePath = tprintf("%s%c..%cclang%cinclude", path_remove_file_from_path(path_app_path()), PATH_SEPARATOR, PATH_SEPARATOR, PATH_SEPARATOR);
+	string_builder_appendf(&workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", builderClangIncludePath);
 
-	std::unordered_set<std::string> uniqueIncludes;
-	For (u64, configIndex, 0, options->configs.size()) {
-		BuildConfig& config = options->configs[configIndex];
-		const std::vector<std::string>& additionalIncludes = config.additionalIncludes; 
-
-		For (u64, includeIndex, 0, additionalIncludes.size()) {
-			const std::string& include = additionalIncludes[includeIndex];
-			uniqueIncludes.insert( include );
-		}
-	}
-
-	for ( const std::string& include : uniqueIncludes ) {
-		string_builder_appendf( &workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", include.c_str() );
-	}
+	AppendUniqueFieldsFromConfigs( &workspaceContent, buildConfigs, "AdditionalIncludePath", []( const BuildConfig& config ) { return config.defines; } );
 
 	string_builder_appendf( &workspaceContent, "\t\t</AdditionalIncludePaths>\n" );
 
 	// ===============================================================================================================
-	// Additional Includes
+	// Defines
 	// ===============================================================================================================
 
 	string_builder_appendf( &workspaceContent, "\t\t<Defines>\n" );
+#ifdef _WIN32
+	string_builder_appendf( &workspaceContent, "\t\t\t<Define>_WIN32</Define>\n" );
+#elif __linux__
+	string_builder_appendf( &workspaceContent, "\t\t\t<Define>__linux__</Define>\n", define.c_str() );
+#endif
 
-	std::unordered_set<std::string> uniqueDefines;
-	For (u64, configIndex, 0, options->configs.size()) {
-		BuildConfig& config = options->configs[configIndex];
-		const std::vector<std::string>& defines = config.defines; 
+	const Compiler compiler = GetCompiler( context, options );
 
-		For (u64, defineIndex, 0, defines.size()) {
-			const std::string& define = defines[defineIndex];
-			uniqueDefines.insert( define );
-		}
+	const char* compilerDefine = nullptr;
+	switch ( compiler ){
+		case Compiler::COMPILER_DEFAULT:
+		case Compiler::COMPILER_CLANG:
+			compilerDefine = "__clang__";
+			break;
+		case Compiler::COMPILER_GCC:
+			compilerDefine = "__GNUC__";
+			break;
+		case Compiler::COMPILER_MSVC:
+			compilerDefine = "_MSC_VER";
+			break;
 	}
 
-	for ( const std::string& define : uniqueDefines ) {
-		string_builder_appendf( &workspaceContent, "\t\t\t<Define>%s</Define>\n", define.c_str() );
+	string_builder_appendf( &workspaceContent, "\t\t\t<Define>%s</Define>\n", compilerDefine );
+
+	const std::vector<std::string>& userCompilerDefines = GetUserCompilerDefines( workspace, compiler );
+	For (u64, defineIndex, 0, userCompilerDefines.size()) {
+		string_builder_appendf( &workspaceContent, "\t\t\t<Define>%s</Define>\n", userCompilerDefines[defineIndex].c_str() );
 	}
+
+	AppendUniqueFieldsFromList( &workspaceContent, globalDefines, "Define" );
 
 	string_builder_appendf( &workspaceContent, "\t\t</Defines>\n" );
 
