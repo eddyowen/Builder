@@ -48,6 +48,7 @@ SOFTWARE.
 #define ARG_VERBOSE_SHORT		"-v"
 #define ARG_VERBOSE_LONG		"--verbose"
 #define ARG_NUKE				"--nuke"
+#define ARG_FORCE_REBUILD		"--force-rebuild"
 #define ARG_CONFIG				"--config="
 #define ARG_VISUAL_STUDIO_BUILD	"--visual-studio-build"
 

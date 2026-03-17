@@ -332,6 +332,9 @@ static s32 ShowUsage( const s32 exitCode ) {
 		"        Sets the config to whatever you specify.\n"
 		"        This must match the name of a config that you set inside \"" SET_BUILDER_OPTIONS_FUNC_NAME "\".\n"
 		"\n"
+		"    " ARG_FORCE_REBUILD " (optional):\n"
+		"        Forces your project to get build, ignoring if it's up-to-date.\n"
+		"\n"
 		"    " ARG_NUKE " <folder> (optional):\n"
 		"        Deletes every file in <folder> and all subfolders, but does not delete <folder>.\n"
 		"\n"
@@ -1125,6 +1128,11 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 			return 0;
 		}
 
+		if ( string_equals( arg, ARG_FORCE_REBUILD ) ) {
+			printf( "[Info] Command line argument \"--force-rebuild\" passed to Builder. Forcing rebuild... \n" );
+			context.forceRebuild = true;
+		}
+
 		if ( string_equals( arg, ARG_VISUAL_STUDIO_BUILD ) ) {
 			isVisualStudioBuild = true;
 
@@ -1281,7 +1289,11 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 
 			setBuilderOptionsFunc( &options );
 
-			context.forceRebuild = options.forceRebuild;
+			if ( options.forceRebuild ) {
+				printf( "[Info] BuildOptions::forceRebuild is enabled. Forcing rebuild... \n" );
+				context.forceRebuild = true;
+			}
+
 			context.consolidateCompilerArgs = options.consolidateCompilerArgs;
 
 			setBuilderOptionsTimeMS = time_ms() - setBuilderOptionsTimeStart;

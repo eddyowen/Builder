@@ -221,7 +221,7 @@ struct VisualStudioSolution {
 	std::string							path;
 };
 
-struct TenxPlatorm {
+struct TenxPlatform {
 	std::string 				name;
 	std::vector<std::string> 	defines;
 };
@@ -233,7 +233,7 @@ struct TenxCompiler {
 
 struct TenxWorkspace
 {
-	std::vector<TenxPlatorm> 	platforms;
+	std::vector<TenxPlatform> 	platforms;
 	std::vector<TenxCompiler> 	compilers;
 	std::vector<std::string> 	globalDefines;
 	std::string 				outputPath;

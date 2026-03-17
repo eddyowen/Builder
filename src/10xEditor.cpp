@@ -196,7 +196,7 @@ bool8 Generate10xWorkspace(buildContext_t *context, BuilderOptions *options) {
 	const std::string& includeFilter 			  = workspace.includeFilter.empty() ? DefaultIncludeFilter : workspace.includeFilter;
 	const std::string& excludeFilter 			  = workspace.excludeFilter.empty() ? DefaultExcludeFilter : workspace.excludeFilter;
 
-	const std::vector<TenxPlatorm>& platforms 	  = workspace.platforms;
+	const std::vector<TenxPlatform>& platforms 	  = workspace.platforms;
 	const std::vector<std::string>& globalDefines = workspace.globalDefines;
 
 	const bool8 isFolder 						  = workspace.isFolder;
@@ -207,8 +207,13 @@ bool8 Generate10xWorkspace(buildContext_t *context, BuilderOptions *options) {
 	const bool8 useVisualStudioEnvBat 			  = workspace.useVisualStudioEnvBat;
 	const bool8 captureExeOutput 				  = workspace.captureExeOutput;
 
-	const char *workspacePath = NULL;
-	const char* inputFilePath = context->inputFilePath.data;
+	const char* inputFile 						  = context->inputFile;
+	const char* inputFilePath 					  = context->inputFilePath.data;
+
+	const char* builderExeFilename		  		  = path_app_path();
+	const char* builderExePath 			  		  = path_remove_file_from_path(builderExeFilename);
+
+	const char *workspacePath = nullptr;
 	if (!outputPath.c_str()) {
 		workspacePath = tprintf("%s%c%s%stest.10x", inputFilePath, PATH_SEPARATOR, outputPath.c_str(), PATH_SEPARATOR);
 	} else {
@@ -231,7 +236,7 @@ bool8 Generate10xWorkspace(buildContext_t *context, BuilderOptions *options) {
 	string_builder_appendf(&workspaceContent, "\t\t<ExcludeFilter>%s</ExcludeFilter>\n", excludeFilter.c_str());
 
 	string_builder_appendf(&workspaceContent, "\t\t<IsFolder>%s</IsFolder>\n",							 	BoolToString(isFolder).data());
-	string_builder_appendf(&workspaceContent, "\t\t<IncludeFilesWithoutExt>%s</IncludeFilesWithoutExt>\n", BoolToString(includeFilesWithoutExt).data());
+	string_builder_appendf(&workspaceContent, "\t\t<IncludeFilesWithoutExt>%s</IncludeFilesWithoutExt>\n",  BoolToString(includeFilesWithoutExt).data());
 	string_builder_appendf(&workspaceContent, "\t\t<SyncFiles>%s</SyncFiles>\n",							BoolToString(syncFiles).data());
 	string_builder_appendf(&workspaceContent, "\t\t<Recursive>%s</Recursive>\n",							BoolToString(recursive).data());
 	string_builder_appendf(&workspaceContent, "\t\t<ShowEmptyFolders>%s</ShowEmptyFolders>\n",				BoolToString(showEmptyFolders).data());
@@ -319,10 +324,10 @@ bool8 Generate10xWorkspace(buildContext_t *context, BuilderOptions *options) {
 		string_builder_appendf(&workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "cppwinrt");
 	}
 
-	const char* builderIncludePath = tprintf("%s%c..%cinclude", path_remove_file_from_path(path_app_path()), PATH_SEPARATOR, PATH_SEPARATOR);
+	const char* builderIncludePath = tprintf("%s%c..%cinclude", builderExePath, PATH_SEPARATOR, PATH_SEPARATOR);
 	string_builder_appendf(&workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", builderIncludePath);
 	
-	const char* builderClangIncludePath = tprintf("%s%c..%cclang%cinclude", path_remove_file_from_path(path_app_path()), PATH_SEPARATOR, PATH_SEPARATOR, PATH_SEPARATOR);
+	const char* builderClangIncludePath = tprintf("%s%c..%cclang%cinclude", builderExePath, PATH_SEPARATOR, PATH_SEPARATOR, PATH_SEPARATOR);
 	string_builder_appendf(&workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", builderClangIncludePath);
 
 	AppendUniqueFieldsFromConfigs( &workspaceContent, buildConfigs, "AdditionalIncludePath", []( const BuildConfig& config ) { return config.defines; } );
@@ -366,6 +371,38 @@ bool8 Generate10xWorkspace(buildContext_t *context, BuilderOptions *options) {
 	AppendUniqueFieldsFromList( &workspaceContent, globalDefines, "Define" );
 
 	string_builder_appendf( &workspaceContent, "\t\t</Defines>\n" );
+
+	// ===============================================================================================================
+	// Config-Platform Properties
+	// ===============================================================================================================
+
+	string_builder_appendf( &workspaceContent, "\t\t<ConfigProperties>\n" );
+
+	if ( platforms.size() > 0 ) {
+
+		For (u64, platformIndex, 0, platforms.size()) {
+			const TenxPlatform& platform = platforms[platformIndex];
+			const char* platformName = platform.name.c_str();
+
+			For (u64, configIndex, 0, buildConfigs.size()) {
+				const BuildConfig& config = buildConfigs[configIndex];
+
+				const char* configName 		= config.name.c_str();
+				const char* binaryFolder 	= config.binaryFolder.c_str();
+
+				string_builder_appendf( &workspaceContent, "\t\t\t<ConfigAndPlatform>\n" );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<Name>%s:%s</Name>\n" , 												configName, 		platformName			   );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<BuildCommand>%s %s --config=%s</BuildCommand>\n" , 					builderExeFilename, inputFile, 		configName );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<RebuildCommand>%s %s --force-rebuild --config=%s</RebuildCommand>\n", 	builderExeFilename, inputFile, 		configName );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<BuildFileCommand>%s %s --config=%s</BuildFileCommand>\n", 				builderExeFilename, inputFile, 		configName );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<CleanCommand>%s --nuke %s</CleanCommand>\n",							builderExeFilename, binaryFolder  			   );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<CancelCommand></CancelCommand>\n" );
+				string_builder_appendf( &workspaceContent, "\t\t\t</ConfigAndPlatform>\n" );
+			}
+		}
+	}
+
+	string_builder_appendf( &workspaceContent, "\t\t</ConfigProperties>\n" );
 
 	string_builder_appendf( &workspaceContent, "\t</Workspace>\n" );
 	string_builder_appendf( &workspaceContent, "</N10X>" );
