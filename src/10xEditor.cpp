@@ -192,8 +192,8 @@ bool8 GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options ) 
 	const char* inputFile 						  = path_canonicalise( context->inputFile			);
 	const char* inputFilePath 					  = path_canonicalise( context->inputFilePath.data	);
 
-	const char* builderExeFilename		  		  = BUILDER_PROGRAM_NAME;
-	const char* builderExePath 			  		  = path_remove_file_from_path(builderExeFilename);
+	const char* builderExeFilename		  		  = tprintf( "%s%c%s", path_remove_file_from_path( path_app_path() ), PATH_SEPARATOR, BUILDER_PROGRAM_NAME );
+	const char* builderExePath 			  		  = path_remove_file_from_path( builderExeFilename );
 
 	const char* workspaceName 					  = name.empty() ? "Workspace" : name.c_str();
 	const char* workspacePath 					  = outputPath.empty() ? inputFilePath : tprintf( "%s%c%s", inputFilePath, PATH_SEPARATOR, outputPath.c_str() );
@@ -291,9 +291,9 @@ bool8 GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options ) 
 	if ( windowsSDKs.size() > 0 ) {
 		std::sort( windowsSDKs.begin(), windowsSDKs.end(), IsNewerVersion );
 		// Use the latest installation only
-		const WindowsSDK& sdk = windowsSDKs[0];
-		const char* sdkPath = sdk.path.c_str();
-		const char* sdkVersion = sdk.version.c_str();
+		const WindowsSDK& sdk 	= windowsSDKs[0];
+		const char* sdkPath 	= sdk.path.c_str();
+		const char* sdkVersion 	= sdk.version.c_str();
 		
 		// sdk.path.c_str() here already contains the trailing "\", so no PATH_SEPARATOR needed
 		const char* additionalIncludeFmt = "\t\t\t<AdditionalIncludePath>%s%s%c%s%c%s</AdditionalIncludePath>\n";
