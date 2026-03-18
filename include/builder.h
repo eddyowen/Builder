@@ -231,20 +231,53 @@ struct TenxCompiler {
 	std::vector<std::string> 	defines;
 };
 
+// 10x Editor's Workspace representation. Workspace settings in 10x are used to provide hints to the parser and to setup build/launch/clean commands. 
+// They won't affect your build. 
 struct TenxWorkspace
 {
+	// List of defines per platform
 	std::vector<TenxPlatform> 	platforms;
+	
+	// List of defines per compiler
 	std::vector<TenxCompiler> 	compilers;
+
+	// Global list of defines for all configs/platforms
 	std::vector<std::string> 	globalDefines;
+
+	// Workspace (.10x file) name
+	std::string					name;
+
+	// Path to your debugger of choice
+	std::string					debuggerPath;
+
+	// Comnnad line or arguments passed to the debugger when 10x launches it
+	std::string					debuggerArgs;
+
+	// Where the .10x file should be output to
 	std::string 				outputPath;
+
+	// List of comma-separated file extensions and folders you want to be visible in the workspace tree when opening 10x
 	std::string 				includeFilter;
+
+	// List of comma-separated file extensions and folders you want to exclude from the workspace tree when opening 10x
 	std::string 				excludeFilter;
-	bool 						isFolder 				= false;
+
+	// Tells 10x to include files with no file extension
 	bool 						includeFilesWithoutExt  = false;
+
+	// Tells 10x if we want to make the editor automatically update when adding/removing files from the project
 	bool 						syncFiles 				= true;
+
+	// Not sure yet
 	bool 						recursive 				= true;
+
+	// Show empty folders in the workspace tree?
 	bool 						showEmptyFolders 		= true;
+
+	// Launch vcvars64.bat when building?
 	bool 						useVisualStudioEnvBat 	= true;
+
+	// Capture your application's output on 10x's Output window?
 	bool 						captureExeOutput 		= true;
 };
 
@@ -290,7 +323,7 @@ struct BuilderOptions {
     // Do you want to generate a 10x Editor Workspace?
 	// If this is set to true, then a code build will NOT happen.
 	// If you don't use Visual Studio then ignore this.
-	bool						generate10xWorkspace;
+	bool						generateTenxWorkspace;
 
 	// Do you want to generate a compilation_commands.json for Clang tooling?
 	// If true, the file will be generated IF the build is successful.

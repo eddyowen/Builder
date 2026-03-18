@@ -50,7 +50,7 @@ namespace {
 	static const char* DefaultExcludeFilter = "*.user,.git,.vs,.cache,.builder,bin,intermediate,bin";
 }
 
-constexpr std::string_view BoolToString(const bool8 value)
+constexpr std::string_view BoolToString( const bool8 value )
 {
 	return value ? "true" : "false";
 }
@@ -62,18 +62,18 @@ struct WindowsSDK {
 	std::string version;
 };
 
-static std::vector<int> ParseWindowsSDKVersion(const std::string& version) {
+static std::vector<int> ParseWindowsSDKVersion( const std::string& version ) {
 	std::vector<int> parts;
-	std::stringstream ss(version);
+	std::stringstream ss( version );
 	std::string part;
-	while (std::getline(ss, part, '.'))
-		parts.push_back(std::stoi(part));
+	while ( std::getline( ss, part, '.') )
+		parts.push_back( std::stoi(part) );
 	return parts;
 }
 
-static bool IsNewerVersion(const WindowsSDK& a, const WindowsSDK& b) {
-	auto partsA = ParseWindowsSDKVersion(a.version);
-	auto partsB = ParseWindowsSDKVersion(b.version);
+static bool IsNewerVersion( const WindowsSDK& a, const WindowsSDK& b ) {
+	auto partsA = ParseWindowsSDKVersion( a.version );
+	auto partsB = ParseWindowsSDKVersion( b.version );
 	return partsA > partsB;
 }
 #endif
@@ -81,16 +81,16 @@ static bool IsNewerVersion(const WindowsSDK& a, const WindowsSDK& b) {
 static std::vector<WindowsSDK> GetInstalledSDKs() {
 #ifdef _WIN32
 	HKEY rootKey;
-	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, R"(SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots)", 0, KEY_READ, &rootKey) != ERROR_SUCCESS)
+	if ( RegOpenKeyExA( HKEY_LOCAL_MACHINE, R"(SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots)", 0, KEY_READ, &rootKey ) != ERROR_SUCCESS )
 		return {};
 
 	// Read the root path ONCE from the root key
 	char rootPath[MAX_PATH];
-	DWORD pathSize = sizeof(rootPath);
+	DWORD pathSize = sizeof( rootPath );
 
 	// No SDK root found
-	if (RegQueryValueExA(rootKey, "KitsRoot10", nullptr, nullptr, (LPBYTE)rootPath, &pathSize) != ERROR_SUCCESS) {
-		RegCloseKey(rootKey);
+	if ( RegQueryValueExA( rootKey, "KitsRoot10", nullptr, nullptr, ( LPBYTE )rootPath, &pathSize ) != ERROR_SUCCESS ) {
+		RegCloseKey( rootKey );
 		return {};
 	}
 
@@ -98,12 +98,12 @@ static std::vector<WindowsSDK> GetInstalledSDKs() {
 	char versionName[64];
 	DWORD index = 0, nameSize = sizeof(versionName);
 
-	while (RegEnumKeyExA(rootKey, index++, versionName, &nameSize, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
-		sdks.push_back({ rootPath, versionName });
-		nameSize = sizeof(versionName);
+	while ( RegEnumKeyExA( rootKey, index++, versionName, &nameSize, nullptr, nullptr, nullptr, nullptr ) == ERROR_SUCCESS ) {
+		sdks.push_back( { rootPath, versionName } );
+		nameSize = sizeof( versionName );
 	}
 
-	RegCloseKey(rootKey);
+	RegCloseKey( rootKey );
 	return sdks;
 #else
 	return {};
@@ -137,69 +137,40 @@ static std::string GetVisualStudioInstallationPath()
 	return vsInstallationPath;
 }
 
-using ConfigFieldAccessor = std::function<const std::vector<std::string>&(const BuildConfig&)>;
-
-static void AppendUniqueFieldsFromConfigs(
-	StringBuilder* stringBuilder,
-	const std::vector<BuildConfig>& buildConfigs,
-	const char* fieldTag,
-	const ConfigFieldAccessor& getField
-) {
-	std::unordered_set<std::string> uniqueEntries;
-	for (const BuildConfig& config : buildConfigs) {
-		const auto& field = getField(config);
-		uniqueEntries.insert(field.begin(), field.end());
-	}
-
-	for (const std::string& entry : uniqueEntries) {
-		string_builder_appendf(stringBuilder, "\t\t\t<%s>%s</%s>\n", fieldTag, entry.c_str(), fieldTag);
-	}
-}
-
-static void AppendUniqueFieldsFromList( StringBuilder* stringBuilder, const std::vector<std::string>& list, const char* fieldTag ) {
-	if ( list.begin() == list.end() ) {
-		return;
-	}
-
-	std::unordered_set<std::string> uniqueEntries;
-	uniqueEntries.insert(list.begin(), list.end());
-
-	for (const std::string& entry : uniqueEntries) {
-		string_builder_appendf(stringBuilder, "\t\t\t<%s>%s</%s>\n", fieldTag, entry.c_str(), fieldTag);
-	}
-}
-
-static const std::vector<std::string> GetUserCompilerDefines(const TenxWorkspace& workspace, Compiler compiler) {
+static const std::vector<std::string> GetUserCompilerDefines( const TenxWorkspace& workspace, Compiler compiler ) {
 	const std::vector<TenxCompiler>& compilers = workspace.compilers;
-	auto it = std::find_if(compilers.begin(), compilers.end(), [&compiler](const TenxCompiler& lhs) {
+	auto it = std::find_if( compilers.begin(), compilers.end(), [&compiler]( const TenxCompiler& lhs ) {
 		return lhs.id == compiler;
 	});
 
-	if (it != compilers.end()) {
+	if ( it != compilers.end() ) {
 		return it->defines;
 	}
 
 	return {};
 }
 
-bool8 Generate10xWorkspace(buildContext_t *context, BuilderOptions *options) {
-	assert(context);
-	assert(context->inputFile);
-	assert(context->inputFilePath.data);
-	assert(options);
+bool8 GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options ) {
+	assert( context );
+	assert( context->inputFile );
+	assert( context->inputFilePath.data );
+	assert( options );
 
 	const std::vector<BuildConfig>& buildConfigs  = options->configs;
 
 	const TenxWorkspace& workspace 				  = options->tenxWorkspace;
 
+
+	const std::string& name						  = workspace.name;
 	const std::string& outputPath 				  = workspace.outputPath;
+	const std::string& debuggerPath 			  = workspace.debuggerPath;
+	const std::string& debuggerArgs 			  = workspace.debuggerArgs;
 	const std::string& includeFilter 			  = workspace.includeFilter.empty() ? DefaultIncludeFilter : workspace.includeFilter;
 	const std::string& excludeFilter 			  = workspace.excludeFilter.empty() ? DefaultExcludeFilter : workspace.excludeFilter;
 
 	const std::vector<TenxPlatform>& platforms 	  = workspace.platforms;
 	const std::vector<std::string>& globalDefines = workspace.globalDefines;
 
-	const bool8 isFolder 						  = workspace.isFolder;
 	const bool8 includeFilesWithoutExt 			  = workspace.includeFilesWithoutExt;
 	const bool8 syncFiles 						  = workspace.syncFiles;
 	const bool8 recursive 						  = workspace.recursive;
@@ -207,89 +178,86 @@ bool8 Generate10xWorkspace(buildContext_t *context, BuilderOptions *options) {
 	const bool8 useVisualStudioEnvBat 			  = workspace.useVisualStudioEnvBat;
 	const bool8 captureExeOutput 				  = workspace.captureExeOutput;
 
-	const char* inputFile 						  = context->inputFile;
-	const char* inputFilePath 					  = context->inputFilePath.data;
+	const char* inputFile 						  = path_canonicalise( context->inputFile			);
+	const char* inputFilePath 					  = path_canonicalise( context->inputFilePath.data	);
 
 	const char* builderExeFilename		  		  = path_app_path();
 	const char* builderExePath 			  		  = path_remove_file_from_path(builderExeFilename);
 
-	const char *workspacePath = nullptr;
-	if (!outputPath.c_str()) {
-		workspacePath = tprintf("%s%c%s%stest.10x", inputFilePath, PATH_SEPARATOR, outputPath.c_str(), PATH_SEPARATOR);
-	} else {
-		workspacePath = tprintf("%s%cstest.10x", inputFilePath, PATH_SEPARATOR);
-	}
+	const char* workspaceName 					  = name.empty() ? "Workspace" : name.c_str();
+	const char* workspacePath 					  = outputPath.empty() ? inputFilePath : tprintf( "%s%c%s", inputFilePath, PATH_SEPARATOR, outputPath.c_str() );
+	const char* workspaceFilename 				  = tprintf( "%s%c%s.10x", workspacePath, PATH_SEPARATOR, workspaceName );
 
 	StringBuilder workspaceContent = {};
-	string_builder_reset(&workspaceContent);
-	defer(string_builder_destroy(&workspaceContent));
+	string_builder_reset( &workspaceContent );
+	defer( string_builder_destroy( &workspaceContent ) );
 
-	string_builder_appendf(&workspaceContent, "<?xml version=\"1.0\"?>\n");
-	string_builder_appendf(&workspaceContent, "<N10X>\n");
-	string_builder_appendf(&workspaceContent, "\t<Workspace>\n");
+	string_builder_appendf( &workspaceContent, "<?xml version=\"1.0\"?>\n"	);
+	string_builder_appendf( &workspaceContent, "<N10X>\n"					);
+	string_builder_appendf( &workspaceContent, "\t<Workspace>\n"			);
 
 	// ===============================================================================================================
 	// Filters
 	// ===============================================================================================================
 
-	string_builder_appendf(&workspaceContent, "\t\t<IncludeFilter>%s</IncludeFilter>\n", includeFilter.c_str());
-	string_builder_appendf(&workspaceContent, "\t\t<ExcludeFilter>%s</ExcludeFilter>\n", excludeFilter.c_str());
+	string_builder_appendf(	&workspaceContent, "\t\t<IncludeFilter>%s</IncludeFilter>\n", includeFilter.c_str() );
+	string_builder_appendf(	&workspaceContent, "\t\t<ExcludeFilter>%s</ExcludeFilter>\n", excludeFilter.c_str() );
 
-	string_builder_appendf(&workspaceContent, "\t\t<IsFolder>%s</IsFolder>\n",							 	BoolToString(isFolder).data());
-	string_builder_appendf(&workspaceContent, "\t\t<IncludeFilesWithoutExt>%s</IncludeFilesWithoutExt>\n",  BoolToString(includeFilesWithoutExt).data());
-	string_builder_appendf(&workspaceContent, "\t\t<SyncFiles>%s</SyncFiles>\n",							BoolToString(syncFiles).data());
-	string_builder_appendf(&workspaceContent, "\t\t<Recursive>%s</Recursive>\n",							BoolToString(recursive).data());
-	string_builder_appendf(&workspaceContent, "\t\t<ShowEmptyFolders>%s</ShowEmptyFolders>\n",				BoolToString(showEmptyFolders).data());
-	string_builder_appendf(&workspaceContent, "\t\t<UseVisualStudioEnvBat>%s</UseVisualStudioEnvBat>\n",	BoolToString(useVisualStudioEnvBat).data());
-	string_builder_appendf(&workspaceContent, "\t\t<CaptureExeOutput>%s</CaptureExeOutput>\n",				BoolToString(captureExeOutput).data());
+	string_builder_appendf( &workspaceContent, "\t\t<IsFolder>false</IsFolder>\n" ); // we don't want 10x to open our workspace as a folder under any circumstance
+	string_builder_appendf( &workspaceContent, "\t\t<IncludeFilesWithoutExt>%s</IncludeFilesWithoutExt>\n", BoolToString(includeFilesWithoutExt).data()		);
+	string_builder_appendf( &workspaceContent, "\t\t<SyncFiles>%s</SyncFiles>\n",							BoolToString(syncFiles).data()					);
+	string_builder_appendf( &workspaceContent, "\t\t<Recursive>%s</Recursive>\n",							BoolToString(recursive).data()					);
+	string_builder_appendf( &workspaceContent, "\t\t<ShowEmptyFolders>%s</ShowEmptyFolders>\n",				BoolToString(showEmptyFolders).data()			);
+	string_builder_appendf( &workspaceContent, "\t\t<UseVisualStudioEnvBat>%s</UseVisualStudioEnvBat>\n",	BoolToString(useVisualStudioEnvBat).data()		);
+	string_builder_appendf( &workspaceContent, "\t\t<CaptureExeOutput>%s</CaptureExeOutput>\n",				BoolToString(captureExeOutput).data()			);
 
 	// ===============================================================================================================
 	// Configs
 	// ===============================================================================================================
 
-	string_builder_appendf(&workspaceContent, "\t\t<Configurations>\n");
-	For (u64, configIndex, 0, options->configs.size()) {
+	string_builder_appendf( &workspaceContent, "\t\t<Configurations>\n" );
+	For ( u64, configIndex, 0, options->configs.size() ) {
 		BuildConfig& config = options->configs[configIndex];
-		string_builder_appendf(&workspaceContent, "\t\t\t<Configuration>");
-		string_builder_appendf(&workspaceContent, config.name.c_str());
-		string_builder_appendf(&workspaceContent, "</Configuration>\n");
+		string_builder_appendf( &workspaceContent, "\t\t\t<Configuration>"	);
+		string_builder_appendf( &workspaceContent, config.name.c_str()		);
+		string_builder_appendf( &workspaceContent, "</Configuration>\n"		);
 	}
-	string_builder_appendf(&workspaceContent, "\t\t</Configurations>\n");
+	string_builder_appendf( &workspaceContent, "\t\t</Configurations>\n" );
 
 	// ===============================================================================================================
 	// Platforms
 	// ===============================================================================================================
 
-	string_builder_appendf(&workspaceContent, "\t\t<Platforms>\n");
+	string_builder_appendf( &workspaceContent, "\t\t<Platforms>\n" );
 	// @NOTE-Ed - Default to x64 if not platforms provided
-	if (platforms.size() == 0) {
-		string_builder_appendf(&workspaceContent, "\t\t\t<Platform>x64</Platform>\n");
+	if ( platforms.size() == 0 ) {
+		string_builder_appendf( &workspaceContent, "\t\t\t<Platform>x64</Platform>\n" );
 	} else {
 		For (u64, platformIndex, 0, platforms.size()) {
-			string_builder_appendf(&workspaceContent, "\t\t\t<Platform>");
-			string_builder_appendf(&workspaceContent, platforms[platformIndex].name.c_str());
-			string_builder_appendf(&workspaceContent, "</Platform>\n");
+			string_builder_appendf( &workspaceContent, "\t\t\t<Platform>" 					 );
+			string_builder_appendf( &workspaceContent, platforms[platformIndex].name.c_str() );
+			string_builder_appendf( &workspaceContent, "</Platform>\n" 						 );
 		}
 	}
-	string_builder_appendf(&workspaceContent, "\t\t</Platforms>\n");
+	string_builder_appendf( &workspaceContent, "\t\t</Platforms>\n" );
 
 	// ===============================================================================================================
 	// Additional Includes
 	// ===============================================================================================================
 
-	string_builder_appendf(&workspaceContent, "\t\t<AdditionalIncludePaths>\n");
+	string_builder_appendf( &workspaceContent, "\t\t<AdditionalIncludePaths>\n" );
 
 	const std::string vsInstallationPath = GetVisualStudioInstallationPath();
-	if (!vsInstallationPath.empty()) {
+	if ( !vsInstallationPath.empty() ) {
 		char* fileContent = nullptr;
 		u64 fileLength;
 
 		const char* vsToolsVersionRelativePath = R"(VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt)";
-		const char* toolsVersionFilename = tprintf("%s%c%s", vsInstallationPath.c_str(), PATH_SEPARATOR, vsToolsVersionRelativePath);
+		const char* toolsVersionFilename = tprintf( "%s%c%s", vsInstallationPath.c_str(), PATH_SEPARATOR, vsToolsVersionRelativePath );
 
-		if (file_read_entire(toolsVersionFilename, &fileContent, &fileLength, true)) {
+		if ( file_read_entire( toolsVersionFilename, &fileContent, &fileLength, true ) ) {
 			// Safe as VCToolsVersion.default.txt always contains only 1 entry
-			std::string msvcVersion = std::string(fileContent).substr(0, strlen(fileContent) - strlen("\r\n"));
+			std::string msvcVersion = std::string( fileContent ).substr( 0, strlen( fileContent ) - strlen( "\r\n" ) );
 
 			string_builder_appendf(
 				&workspaceContent,
@@ -303,34 +271,45 @@ bool8 Generate10xWorkspace(buildContext_t *context, BuilderOptions *options) {
 				"include"
 			);
 
-			string_builder_appendf(&workspaceContent, "\t\t\t<AdditionalIncludePath>%s%c%s</AdditionalIncludePath>\n", vsInstallationPath.c_str(), PATH_SEPARATOR, path_canonicalise("VC/Auxiliary/VS/include"));
+			string_builder_appendf( &workspaceContent, "\t\t\t<AdditionalIncludePath>%s%c%s</AdditionalIncludePath>\n", vsInstallationPath.c_str(), PATH_SEPARATOR, path_canonicalise("VC/Auxiliary/VS/include" ) );
 		}
 	}
 
 	// Windows SDK include paths (if any)
 	std::vector<WindowsSDK> windowsSDKs = GetInstalledSDKs();
-	if (windowsSDKs.size() > 0) {
-		std::sort(windowsSDKs.begin(), windowsSDKs.end(), IsNewerVersion);
+	if ( windowsSDKs.size() > 0 ) {
+		std::sort( windowsSDKs.begin(), windowsSDKs.end(), IsNewerVersion );
 		// Use the latest installation only
 		const WindowsSDK& sdk = windowsSDKs[0];
 		const char* sdkPath = sdk.path.c_str();
 		const char* sdkVersion = sdk.version.c_str();
 		
-		const char* additionalIncludeFmt = "\t\t\t<AdditionalIncludePath>%s%s%c%s%c%s</AdditionalIncludePath>\n";
 		// sdk.path.c_str() here already contains the trailing "\", so no PATH_SEPARATOR needed
-		string_builder_appendf(&workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "ucrt");
-		string_builder_appendf(&workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "um");
-		string_builder_appendf(&workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "shared");
-		string_builder_appendf(&workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "cppwinrt");
+		const char* additionalIncludeFmt = "\t\t\t<AdditionalIncludePath>%s%s%c%s%c%s</AdditionalIncludePath>\n";
+		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "ucrt"		);
+		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "um"		);
+		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "shared"	);
+		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "cppwinrt"	);
 	}
 
-	const char* builderIncludePath = tprintf("%s%c..%cinclude", builderExePath, PATH_SEPARATOR, PATH_SEPARATOR);
-	string_builder_appendf(&workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", builderIncludePath);
+	const char* builderIncludePath = tprintf( "%s%c..%cinclude", builderExePath, PATH_SEPARATOR, PATH_SEPARATOR );
+	string_builder_appendf( &workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", builderIncludePath );
 	
-	const char* builderClangIncludePath = tprintf("%s%c..%cclang%cinclude", builderExePath, PATH_SEPARATOR, PATH_SEPARATOR, PATH_SEPARATOR);
-	string_builder_appendf(&workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", builderClangIncludePath);
+	const char* builderClangIncludePath = tprintf( "%s%c..%c%s", builderExePath, PATH_SEPARATOR, PATH_SEPARATOR, path_canonicalise("clang/include") );
+	string_builder_appendf( &workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", builderClangIncludePath );
 
-	AppendUniqueFieldsFromConfigs( &workspaceContent, buildConfigs, "AdditionalIncludePath", []( const BuildConfig& config ) { return config.defines; } );
+	const char* builderClangIncludePath2 = tprintf( "%s%c..%c%s", builderExePath, PATH_SEPARATOR, PATH_SEPARATOR, path_canonicalise("clang/lib/clang/20/include" ) );
+	string_builder_appendf( &workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", builderClangIncludePath2 );
+
+	std::unordered_set<std::string> uniqueConfigIncludes;
+	for ( const BuildConfig& config : buildConfigs ) {
+		const std::vector<std::string>& defines = config.additionalIncludes;
+		uniqueConfigIncludes.insert( defines.begin(), defines.end() );
+	}
+
+	for ( const std::string& entry : uniqueConfigIncludes ) {
+		string_builder_appendf( &workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", path_canonicalise( entry.c_str() ) );
+	}
 
 	string_builder_appendf( &workspaceContent, "\t\t</AdditionalIncludePaths>\n" );
 
@@ -339,6 +318,7 @@ bool8 Generate10xWorkspace(buildContext_t *context, BuilderOptions *options) {
 	// ===============================================================================================================
 
 	string_builder_appendf( &workspaceContent, "\t\t<Defines>\n" );
+
 #ifdef _WIN32
 	string_builder_appendf( &workspaceContent, "\t\t\t<Define>_WIN32</Define>\n" );
 #elif __linux__
@@ -364,11 +344,16 @@ bool8 Generate10xWorkspace(buildContext_t *context, BuilderOptions *options) {
 	string_builder_appendf( &workspaceContent, "\t\t\t<Define>%s</Define>\n", compilerDefine );
 
 	const std::vector<std::string>& userCompilerDefines = GetUserCompilerDefines( workspace, compiler );
-	For (u64, defineIndex, 0, userCompilerDefines.size()) {
+	For ( u64, defineIndex, 0, userCompilerDefines.size() ) {
 		string_builder_appendf( &workspaceContent, "\t\t\t<Define>%s</Define>\n", userCompilerDefines[defineIndex].c_str() );
 	}
 
-	AppendUniqueFieldsFromList( &workspaceContent, globalDefines, "Define" );
+	std::unordered_set<std::string> uniqueGlobalDefines;
+	uniqueGlobalDefines.insert( globalDefines.begin(), globalDefines.end() );
+
+	for ( const std::string& entry : uniqueGlobalDefines) {
+		string_builder_appendf( &workspaceContent, "\t\t\t<Define>%s</Define>\n", entry.c_str() );
+	}
 
 	string_builder_appendf( &workspaceContent, "\t\t</Defines>\n" );
 
@@ -380,28 +365,77 @@ bool8 Generate10xWorkspace(buildContext_t *context, BuilderOptions *options) {
 
 	if ( platforms.size() > 0 ) {
 
-		For (u64, platformIndex, 0, platforms.size()) {
+		For ( u64, platformIndex, 0, platforms.size() ) {
 			const TenxPlatform& platform = platforms[platformIndex];
 			const char* platformName = platform.name.c_str();
 
-			For (u64, configIndex, 0, buildConfigs.size()) {
+			For ( u64, configIndex, 0, buildConfigs.size() ) {
 				const BuildConfig& config = buildConfigs[configIndex];
 
-				const char* configName 		= config.name.c_str();
-				const char* binaryFolder 	= config.binaryFolder.c_str();
+				const char* configName 				= config.name.c_str();
+				const char* binaryName 				= config.binaryName.c_str();
+				const char* binaryFolderRelative 	= path_canonicalise( config.binaryFolder.c_str() );
+#ifdef	_WIN32
+				const char* binaryExtension 		= ".exe";
+#elif
+				const char* binaryExtension 		= "";
+#endif
+				const char* binaryFolderPath 		= tprintf( "%s%c%s%c", path_canonicalise( inputFilePath ), PATH_SEPARATOR, path_canonicalise( binaryFolderRelative ), PATH_SEPARATOR );
+				const char* binaryFilename   		= tprintf( "%s%s%s", binaryFolderPath, binaryName, binaryExtension );
 
 				string_builder_appendf( &workspaceContent, "\t\t\t<ConfigAndPlatform>\n" );
-				string_builder_appendf( &workspaceContent, "\t\t\t\t<Name>%s:%s</Name>\n" , 												configName, 		platformName			   );
-				string_builder_appendf( &workspaceContent, "\t\t\t\t<BuildCommand>%s %s --config=%s</BuildCommand>\n" , 					builderExeFilename, inputFile, 		configName );
-				string_builder_appendf( &workspaceContent, "\t\t\t\t<RebuildCommand>%s %s --force-rebuild --config=%s</RebuildCommand>\n", 	builderExeFilename, inputFile, 		configName );
-				string_builder_appendf( &workspaceContent, "\t\t\t\t<BuildFileCommand>%s %s --config=%s</BuildFileCommand>\n", 				builderExeFilename, inputFile, 		configName );
-				string_builder_appendf( &workspaceContent, "\t\t\t\t<CleanCommand>%s --nuke %s</CleanCommand>\n",							builderExeFilename, binaryFolder  			   );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<Name>%s:%s</Name>\n" , 												configName, 		 platformName					 );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<BuildCommand>%s %s --config=%s</BuildCommand>\n" , 					builderExeFilename,  inputFile, 		configName   );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<RebuildCommand>%s %s --force-rebuild --config=%s</RebuildCommand>\n", 	builderExeFilename,  inputFile, 		configName   );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<BuildFileCommand>%s %s --config=%s</BuildFileCommand>\n", 				builderExeFilename,  inputFile, 		configName   );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<CleanCommand>%s --nuke %s</CleanCommand>\n",							builderExeFilename,  binaryFolderRelative			 );
 				string_builder_appendf( &workspaceContent, "\t\t\t\t<CancelCommand></CancelCommand>\n" );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<BuildWorkingDirectory>%s</BuildWorkingDirectory>\n", 					inputFilePath									 	 );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<Exe>%s</Exe>\n", 														binaryFilename 				 						 );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<Args></Args>\n" );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<WorkingDirectory>%s</WorkingDirectory>\n", 							inputFilePath				 						 );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<DebugCommand>$(Executable)</DebugCommand>\n" );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<DebuggerExe>%s %s</DebuggerExe>\n", 									debuggerPath.c_str(), debuggerArgs.c_str()  		 );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<DebugSln></DebugSln>\n" );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<ForceIncludes></ForceIncludes>\n" );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<PrioritiseFiles></PrioritiseFiles>\n" );
 				string_builder_appendf( &workspaceContent, "\t\t\t</ConfigAndPlatform>\n" );
+
+				string_builder_appendf( &workspaceContent, "\t\t\t<Config>\n" );
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<Name>%s</Name>\n", configName );
+				const std::vector<std::string>& configDefines = config.defines;
+				if (configDefines.size() == 0) {
+					string_builder_appendf( &workspaceContent, "\t\t\t\t<Defines></Defines>\n" );
+					string_builder_appendf( &workspaceContent, "\t\t\t</Config>\n" );
+					continue;
+				}
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<Defines>\n" );
+				For (u64, defineIndex, 0, configDefines.size()) {
+					const std::string& define = configDefines[defineIndex];
+					string_builder_appendf( &workspaceContent, "\t\t\t\t\t<Define>%s</Define>\n", define.c_str() );
+				}
+				string_builder_appendf( &workspaceContent, "\t\t\t\t</Defines>\n" );
+				string_builder_appendf( &workspaceContent, "\t\t\t</Config>\n" );
 			}
+
+			string_builder_appendf( &workspaceContent, "\t\t\t<Platform>\n" );
+			string_builder_appendf( &workspaceContent, "\t\t\t\t<Name>%s</Name>\n", platformName );
+			const std::vector<std::string>& platformDefines = platform.defines;
+			if (platformDefines.size() == 0) {
+				string_builder_appendf( &workspaceContent, "\t\t\t\t<Defines></Defines>\n" );
+				string_builder_appendf( &workspaceContent, "\t\t\t</Platform>\n" );
+				continue;
+			}
+			string_builder_appendf( &workspaceContent, "\t\t\t\t<Defines>\n" );
+			For (u64, defineIndex, 0, platformDefines.size()) {
+				const std::string& define = platformDefines[defineIndex];
+				string_builder_appendf( &workspaceContent, "\t\t\t\t\t<Define>%s</Define>\n", define.c_str() );
+			}
+			string_builder_appendf( &workspaceContent, "\t\t\t\t</Defines>\n" );
+			string_builder_appendf( &workspaceContent, "\t\t\t</Platform>\n" );
 		}
 	}
-
+			
 	string_builder_appendf( &workspaceContent, "\t\t</ConfigProperties>\n" );
 
 	string_builder_appendf( &workspaceContent, "\t</Workspace>\n" );
@@ -410,7 +444,7 @@ bool8 Generate10xWorkspace(buildContext_t *context, BuilderOptions *options) {
 	const char *content = string_builder_to_string( &workspaceContent );
 	const u64 contentLength = strlen( content );
 
-	bool8 written = file_write_entire( workspacePath, content, contentLength );
+	bool8 written = file_write_entire( workspaceFilename, content, contentLength );
 	if ( !written ) {
 		errorCode_t errorCode = get_last_error_code();
 		error( "Failed to write \"%s\": " ERROR_CODE_FORMAT ".\n", workspacePath, errorCode );

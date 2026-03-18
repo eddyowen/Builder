@@ -1339,10 +1339,13 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 		printf( "Done.\n\n" );
 
 		visualStudioGenerationTimeMS = time_ms() - start;
-	} else if (options.generate10xWorkspace) {
-		float64 start = time_ms();
+	} else if ( options.generateTenxWorkspace ) {
 
-		bool8 result = Generate10xWorkspace(&context, &options);
+		printf( "Generating 10x Workspace file\n" );
+		
+		float64 start = time_ms();
+		
+		bool8 result = GenerateTenxWorkspace(&context, &options);
 		if ( !result ) {
 			error( "Failed to generate 10x Workspace.\n" );
 			QUIT_ERROR();
@@ -1640,7 +1643,7 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 		if ( options.generateSolution && !isVisualStudioBuild ) {
 			printf( "    Generate solution:  %f ms\n", visualStudioGenerationTimeMS );
 		}
-		if ( options.generate10xWorkspace) {
+		if ( options.generateTenxWorkspace) {
 			printf( "    Generate 10x Workspace:  %f ms\n", TenXEditorGenerationTimeMS );
 		}
 		printf( "    Total time:         %f ms\n", time_ms() - totalTimeStart );
