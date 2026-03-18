@@ -359,6 +359,9 @@ bool8 GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options ) 
 		string_builder_appendf( &workspaceContent, "\t\t\t<Define>%s</Define>\n", userCompilerDefines[defineIndex].c_str() );
 	}
 
+	// Appending this define just for conviniece for the user
+	string_builder_appendf( &workspaceContent, "\t\t\t<Define>BUILDER_DOING_USER_CONFIG_BUILD</Define>\n" );
+
 	std::unordered_set<std::string> uniqueGlobalDefines;
 	uniqueGlobalDefines.insert( globalDefines.begin(), globalDefines.end() );
 
