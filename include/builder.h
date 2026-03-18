@@ -140,6 +140,11 @@ struct BuildConfig {
 	// This path is relative to the file you pass into Builder.
 	std::string					binaryFolder;
 
+	// The folder you want the "intermediate binary" files (like .o files) into.
+	// This is relative to 'binaryFolder'.
+	// If this doesn't get set then Builder will just put intermediate files in the same place as 'binaryFolder'.
+	std::string					intermediateFolder;
+
 	// The name of the config.
 	// If you have multiple BuildConfigs (E.G. one for debug and one for release) you need to set this for each config.
 	// Then when you build, you'll tell Builder which config to use by using the command line argument:
@@ -169,6 +174,12 @@ struct BuildConfig {
 
 	// Do you want warnings to count as errors?
 	bool						warningsAsErrors;
+
+	// This function runs just before this BuildConfig gets built.
+	void						( *OnPreBuild )();
+
+	// This function runs just after this BuildConfig gets built.
+	void						( *OnPostBuild )();
 };
 
 struct VisualStudioConfig {
@@ -328,6 +339,11 @@ struct BuilderOptions {
 	// Do you want to generate a compilation_commands.json for Clang tooling?
 	// If true, the file will be generated IF the build is successful.
 	bool						generateCompilationDatabase;
+};
+
+struct CommandLineArgs {
+	char	**argv;
+	int		argc;
 };
 
 static void AddBuildConfigUnique( BuildConfig *config, std::vector<BuildConfig> &outConfigs );
