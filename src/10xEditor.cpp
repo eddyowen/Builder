@@ -99,7 +99,19 @@ static std::vector<WindowsSDK> GetInstalledSDKs() {
 	DWORD index = 0, nameSize = sizeof(versionName);
 
 	while ( RegEnumKeyExA( rootKey, index++, versionName, &nameSize, nullptr, nullptr, nullptr, nullptr ) == ERROR_SUCCESS ) {
-		sdks.push_back( { rootPath, versionName } );
+		// Verify only SDKs within Include/ at ../Windows Kits/10/
+		const char* sdkPath = tprintf( "%s%s%c%s", rootPath, "Include", PATH_SEPARATOR, versionName );
+		if( folder_exists( sdkPath ) ) {
+			
+			const char* ucrtPath = tprintf( "%s%s%c%s%c%s", rootPath, "Include", PATH_SEPARATOR, versionName, PATH_SEPARATOR, "ucrt" );
+			const char* umPath 	 = tprintf( "%s%s%c%s%c%s", rootPath, "Include", PATH_SEPARATOR, versionName, PATH_SEPARATOR, "um" );
+
+			// Only consider valid SDKs that contain at least these 2 folders
+			if( folder_exists( ucrtPath ) && folder_exists( umPath ) ) {
+				sdks.push_back( { rootPath, versionName } );
+			}
+		}
+
 		nameSize = sizeof( versionName );
 	}
 
@@ -160,7 +172,6 @@ bool8 GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options ) 
 
 	const TenxWorkspace& workspace 				  = options->tenxWorkspace;
 
-
 	const std::string& name						  = workspace.name;
 	const std::string& outputPath 				  = workspace.outputPath;
 	const std::string& debuggerPath 			  = workspace.debuggerPath;
@@ -181,7 +192,7 @@ bool8 GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options ) 
 	const char* inputFile 						  = path_canonicalise( context->inputFile			);
 	const char* inputFilePath 					  = path_canonicalise( context->inputFilePath.data	);
 
-	const char* builderExeFilename		  		  = path_app_path();
+	const char* builderExeFilename		  		  = BUILDER_PROGRAM_NAME;
 	const char* builderExePath 			  		  = path_remove_file_from_path(builderExeFilename);
 
 	const char* workspaceName 					  = name.empty() ? "Workspace" : name.c_str();
@@ -286,10 +297,10 @@ bool8 GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options ) 
 		
 		// sdk.path.c_str() here already contains the trailing "\", so no PATH_SEPARATOR needed
 		const char* additionalIncludeFmt = "\t\t\t<AdditionalIncludePath>%s%s%c%s%c%s</AdditionalIncludePath>\n";
-		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "ucrt"		);
-		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "um"		);
-		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "shared"	);
-		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "cppwinrt"	);
+		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "Include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "ucrt"		);
+		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "Include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "um"		);
+		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "Include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "shared"	);
+		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "Include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "cppwinrt"	);
 	}
 
 	const char* builderIncludePath = tprintf( "%s%c..%cinclude", builderExePath, PATH_SEPARATOR, PATH_SEPARATOR );
