@@ -227,8 +227,8 @@ bool8 GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options ) 
 	// ===============================================================================================================
 
 	string_builder_appendf( &workspaceContent, "\t\t<Configurations>\n" );
-	For ( u64, configIndex, 0, options->configs.size() ) {
-		BuildConfig& config = options->configs[configIndex];
+	For ( u64, configIndex, 0, buildConfigs.size() ) {
+		BuildConfig& config = buildConfigs[configIndex];
 		string_builder_appendf( &workspaceContent, "\t\t\t<Configuration>"	);
 		string_builder_appendf( &workspaceContent, config.name.c_str()		);
 		string_builder_appendf( &workspaceContent, "</Configuration>\n"		);
