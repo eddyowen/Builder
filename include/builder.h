@@ -261,7 +261,7 @@ struct TenxWorkspace
 	// Path to your debugger of choice
 	std::string					debuggerPath;
 
-	// Comnnad line or arguments passed to the debugger when 10x launches it
+	// Comnnad line of arguments passed to the debugger when 10x launches it
 	std::string					debuggerArgs;
 
 	// Where the .10x file should be output to
