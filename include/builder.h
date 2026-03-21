@@ -232,11 +232,13 @@ struct VisualStudioSolution {
 	std::string							path;
 };
 
+// Platform representation in 10x Workspace's Settings. List of defines per platform. Only used as hints for 10x's parser.
 struct TenxPlatform {
 	std::string 				name;
 	std::vector<std::string> 	defines;
 };
 
+// Compiler representation in 10x Workspace's Settings. List of defines per compiler. Only used as hints for 10x's parser.
 struct TenxCompiler {
 	Compiler 					id;
 	std::vector<std::string> 	defines;
@@ -257,6 +259,9 @@ struct TenxWorkspace
 
 	// Workspace (.10x file) name
 	std::string					name;
+
+	// Relative path to the build script originally provided to Builder, used as an override for the argument passed to the various *Command settings that 10x Workspaces supports.
+	std::string					buildScriptOverride;
 
 	// Path to your debugger of choice
 	std::string					debuggerPath;
