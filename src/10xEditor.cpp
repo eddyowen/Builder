@@ -190,7 +190,7 @@ bool8 GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options ) 
 	const bool8 useVisualStudioEnvBat 			  = workspace.useVisualStudioEnvBat;
 	const bool8 captureExeOutput 				  = workspace.captureExeOutput;
 
-	const char* inputFilePath 					  = path_canonicalise( context->inputFilePath.data );
+	const char* inputFilePath 					  = path_absolute_path(path_canonicalise( context->inputFilePath.data ) );
 	const char* inputFile 						  = buildScriptOverride.empty() ? path_canonicalise( context->inputFile ) : tprintf( "%s%c%s", inputFilePath, PATH_SEPARATOR, buildScriptOverride.c_str() );
 
 	const char* builderExeFilename				  = tprintf( "%s%c%s", path_remove_file_from_path( path_app_path() ), PATH_SEPARATOR, BUILDER_PROGRAM_NAME );
