@@ -1311,10 +1311,10 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 			setBuilderOptionsFunc( &options );
 		}
 
-			if ( options.forceRebuild ) {
-				printf( "[Info] BuildOptions::forceRebuild is enabled. Forcing rebuild... \n" );
-				context.forceRebuild = true;
-			}
+		if ( options.forceRebuild ) {
+			printf( "[Info] BuildOptions::forceRebuild is enabled. Forcing rebuild... \n" );
+			context.forceRebuild = true;
+		}
 
 			context.consolidateCompilerArgs = options.consolidateCompilerArgs;
 
