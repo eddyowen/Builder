@@ -490,6 +490,8 @@ static buildResult_t BuildBinary( buildContext_t *context, BuildConfig *config, 
 			return BUILD_RESULT_SKIPPED;
 		}
 
+		printf( "\n" );
+
 		if ( !compilerBackend->LinkIntermediateFiles( compilerBackend, intermediateFiles, config ) ) {
 			error( "Linking failed.\n" );
 			return BUILD_RESULT_FAILED;
@@ -1042,7 +1044,7 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 	core_init( MEM_MEGABYTES( 128 ) );	// TODO(DM): 26/03/2025: can we just use defaults for this now?
 	defer( core_shutdown() );
 
-	printf( "Builder v%d.%d.%d RC1\n\n", BUILDER_VERSION_MAJOR, BUILDER_VERSION_MINOR, BUILDER_VERSION_PATCH );
+	printf( "Builder v%d.%d.%d RC2\n\n", BUILDER_VERSION_MAJOR, BUILDER_VERSION_MINOR, BUILDER_VERSION_PATCH );
 
 	buildContext_t context = {
 		.configIndices	= hashmap_create( 1 ),	// TODO(DM): 30/03/2025: whats a reasonable default here?
@@ -1552,7 +1554,7 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 			}
 
 			// make sure intermediate folder is set relative to the binary folder
-			if ( config->intermediateFolder.empty() ) {
+			if ( !config->intermediateFolder.empty() ) {
 				config->intermediateFolder = tprintf( "%s%c%s", config->binaryFolder.c_str(), PATH_SEPARATOR, config->intermediateFolder.c_str() );
 			} else {
 				config->intermediateFolder = config->binaryFolder;
