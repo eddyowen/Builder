@@ -1076,7 +1076,7 @@ Compiler GetCompiler( buildContext_t *context, BuilderOptions *options ) {
 	return Compiler::COMPILER_DEFAULT;
 }
 
-int BuilderMain( const int firstArg, int argc, char **argv ) {
+int BuilderMain( const int firstArg, int argc, const char * const * argv ) {
 	float64 totalTimeStart = time_ms();
 
 	float64 userConfigBuildTimeMS = -1.0;
@@ -1508,9 +1508,6 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 				);
 			}
 		}
-
-
-		std::vector<BuildConfig> configsToBuild;
 
 		// if no configs were manually added then assume we are just doing a default build with no user-specified options
 		if ( options.configs.size() == 0 ) {
