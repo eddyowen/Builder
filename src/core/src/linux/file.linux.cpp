@@ -74,7 +74,7 @@ static bool8 create_folder_internal( const char* path ) {
 	return result == 0;
 }
 
-File file_open( const char* filename, bool read_only ) {
+File file_open( const char* filename, bool8 read_only ) {
 	assert( filename );
 
 	if (read_only) {

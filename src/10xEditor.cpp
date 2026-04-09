@@ -27,10 +27,12 @@
 */
 
 #include "builder_local.h"
+
+#ifdef _WIN32
+#include "core/include/debug.h"
 #include "core/include/allocation_context.h"
 #include "core/include/array.inl"
 #include "core/include/core_types.h"
-#include "core/include/debug.h"
 #include "core/include/string_builder.h"
 #include "core/include/string_helpers.h"
 #include "core/include/file.h"
@@ -40,10 +42,8 @@
 #include <functional>
 #include <algorithm>
 
-#ifdef _WIN32
 #include <sstream>
 #include <unordered_set>
-#endif
 
 namespace {
 	static const char* DefaultIncludeFilter = "*.*";
@@ -55,7 +55,6 @@ constexpr std::string_view BoolToString( const bool8 value )
 	return value ? "true" : "false";
 }
 
-#ifdef _WIN32
 
 struct WindowsSDK {
 	std::string path;
@@ -76,10 +75,8 @@ static bool IsNewerVersion( const WindowsSDK& a, const WindowsSDK& b ) {
 	auto partsB = ParseWindowsSDKVersion( b.version );
 	return partsA > partsB;
 }
-#endif
 
 static std::vector<WindowsSDK> GetInstalledSDKs() {
-#ifdef _WIN32
 	HKEY rootKey;
 	if ( RegOpenKeyExA( HKEY_LOCAL_MACHINE, R"(SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots)", 0, KEY_READ, &rootKey ) != ERROR_SUCCESS )
 		return {};
@@ -117,15 +114,12 @@ static std::vector<WindowsSDK> GetInstalledSDKs() {
 
 	RegCloseKey( rootKey );
 	return sdks;
-#else
 	return {};
-#endif
 }
 
 static std::string GetVisualStudioInstallationPath()
 {
 	std::string vsInstallationPath;
-#ifdef _WIN32
 	String vswhereStdout;
 
 	Array<const char *> args;
@@ -145,7 +139,6 @@ static std::string GetVisualStudioInstallationPath()
 	}
 
 	vsInstallationPath = vswhereStdout.data;
-#endif
 	return vsInstallationPath;
 }
 
@@ -154,20 +147,23 @@ static const std::vector<std::string> GetUserCompilerDefines( const TenxWorkspac
 	auto it = std::find_if( compilers.begin(), compilers.end(), [&compiler]( const TenxCompiler& lhs ) {
 		return lhs.id == compiler;
 	});
-
+	
 	if ( it != compilers.end() ) {
 		return it->defines;
 	}
-
+	
 	return {};
 }
+#endif
 
 bool8 GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options ) {
+#ifdef _WIN32
 	assert( context );
 	assert( context->inputFile );
 	assert( context->inputFilePath.data );
 	assert( options );
 
+	
 	const std::vector<BuildConfig>& buildConfigs  = options->configs;
 
 	const TenxWorkspace& workspace 				  = options->tenxWorkspace;
@@ -469,4 +465,9 @@ bool8 GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options ) 
 
 	options->configs.clear();
 	return true;
+#elif defined(__linux__)
+	(void)context;
+	(void)options;
+	return true;
+#endif
 }

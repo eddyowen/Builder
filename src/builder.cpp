@@ -1427,7 +1427,7 @@ int BuilderMain( const int firstArg, int argc, const char * const * argv ) {
 		
 		float64 start = time_ms();
 		
-		bool8 result = GenerateTenxWorkspace(&context, &options);
+		bool8 result = GenerateTenxWorkspace( &context, &options );
 		if ( !result ) {
 			error( "Failed to generate 10x Workspace.\n" );
 			QUIT_ERROR();
