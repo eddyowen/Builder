@@ -44,3 +44,5 @@ x64
 # zed stuff
 #
 .zed
+Builder.raddbg_project
+Builder.10x
