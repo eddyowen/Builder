@@ -1,14 +1,14 @@
 #include <builder.h>
 
-static void GetBuildConfigs( BuilderOptions *options ) {
+#include "../test_compiler_override.h"
+
+BUILDER_CALLBACK void SetBuilderOptions( BuilderOptions *options, CommandLineArgs *args ) {
+	ApplyCompilerOverride( options, args );
+
 	BuildConfig library = {
 		.name			= "library",
 		.binaryFolder	= "bin",
-#if defined( _WIN32 )
 		.binaryName		= "test_dynamic_lib",
-#elif defined( __linux__ )
-		.binaryName		= "libtest_dynamic_lib",
-#endif
 		.binaryType		= BINARY_TYPE_DYNAMIC_LIBRARY,
 		.sourceFiles	= { "lib/*.cpp" },
 		.defines		= { "DYNAMIC_LIBRARY_EXPORTS" },
@@ -25,16 +25,15 @@ static void GetBuildConfigs( BuilderOptions *options ) {
 		.sourceFiles		= { "program/*.cpp" },
 		.additionalIncludes	= { "lib" },
 		.additionalLibPaths	= { "bin" },
+#ifdef _WIN32
+		.additionalLibs		= { "test_dynamic_lib" },
+#else
+		.additionalLibs		= { ":test_dynamic_lib.so" },
+#endif
 #ifdef __linux__
 		.ignoreWarnings		= { "-fPIC" },
 #endif
 	};
-
-	if ( options->compilerPath == "cl" ) {
-		program.additionalLibs = { "test_dynamic_lib.lib" };
-	} else {
-		program.additionalLibs = { "test_dynamic_lib" };
-	}
 
 	// only need to add program config
 	// program depends on library, so library will get added automatically when adding program

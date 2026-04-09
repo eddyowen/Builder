@@ -30,6 +30,7 @@ SOFTWARE.
 
 #include "core/include/allocation_context.h"
 #include "core/include/array.inl"
+#include "core/include/core_types.h"
 #include "core/include/string_helpers.h"
 #include "core/include/string_builder.h"
 #include "core/include/paths.h"
@@ -43,6 +44,7 @@ SOFTWARE.
 #include "core/include/core_string.h"
 #include "core/include/hashmap.h"
 #include "core/include/file.h"
+#include "win_support.h"
 
 #ifdef _WIN64
 #include <Shlwapi.h>
@@ -64,8 +66,8 @@ SOFTWARE.
 
 enum {
 	BUILDER_VERSION_MAJOR	= 0,
-	BUILDER_VERSION_MINOR	= 10,
-	BUILDER_VERSION_PATCH	= 4,
+	BUILDER_VERSION_MINOR	= 11,
+	BUILDER_VERSION_PATCH	= 3,
 };
 
 enum buildResult_t {
@@ -81,6 +83,8 @@ enum buildResult_t {
 #define QUIT_ERROR() \
 	debug_break(); \
 	return 1
+
+bool8 g_verbose = false;
 
 #ifdef __linux__
 #pragma clang diagnostic push
@@ -151,6 +155,22 @@ bool8 FileIsHeaderFile( const char *filename ) {
 }
 
 static const char *BuildConfig_ToString( const BuildConfig *config ) {
+	auto LanguageVersionToString = []( const LanguageVersion version ) -> const char * {
+		switch ( version ) {
+			case LANGUAGE_VERSION_UNSET:	return "LANGUAGE_VERSION_UNSET";
+			case LANGUAGE_VERSION_C89:		return "LANGUAGE_VERSION_C89";
+			case LANGUAGE_VERSION_C99:		return "LANGUAGE_VERSION_C99";
+			case LANGUAGE_VERSION_C11:		return "LANGUAGE_VERSION_C11";
+			case LANGUAGE_VERSION_C17:		return "LANGUAGE_VERSION_C17";
+			case LANGUAGE_VERSION_C23:		return "LANGUAGE_VERSION_C23";
+			case LANGUAGE_VERSION_CPP11:	return "LANGUAGE_VERSION_CPP11";
+			case LANGUAGE_VERSION_CPP14:	return "LANGUAGE_VERSION_CPP14";
+			case LANGUAGE_VERSION_CPP17:	return "LANGUAGE_VERSION_CPP17";
+			case LANGUAGE_VERSION_CPP20:	return "LANGUAGE_VERSION_CPP20";
+			case LANGUAGE_VERSION_CPP23:	return "LANGUAGE_VERSION_CPP23";
+		}
+	};
+
 	auto BinaryTypeToString = []( const BinaryType type ) -> const char * {
 		switch ( type ) {
 			case BINARY_TYPE_EXE:				return "BINARY_TYPE_EXE";
@@ -218,16 +238,22 @@ static const char *BuildConfig_ToString( const BuildConfig *config ) {
 	PrintSTDStringArray( "additionalIncludes", config->additionalIncludes );
 	PrintSTDStringArray( "additionalLibPaths", config->additionalLibPaths );
 	PrintSTDStringArray( "additionalLibs", config->additionalLibs );
+	PrintSTDStringArray( "warningLevels", config->warningLevels );
 	PrintSTDStringArray( "ignoreWarnings", config->ignoreWarnings );
 	PrintSTDStringArray( "additionalCompilerArguments", config->additionalCompilerArguments );
+	PrintSTDStringArray( "additionalLinkerArguments", config->additionalLinkerArguments );
 
 	PrintField( "binaryName", config->binaryName.c_str() );
 	PrintField( "binaryFolder", config->binaryFolder.c_str() );
+	PrintField( "intermediateFolder", config->intermediateFolder.c_str() );
+	PrintField( "languageVersion", LanguageVersionToString( config->languageVersion ) );
 	PrintField( "binaryType", BinaryTypeToString( config->binaryType ) );
 	PrintField( "optimizationLevel", OptimizationLevelToString( config->optimizationLevel ) );
 	PrintField( "removeSymbols", config->removeSymbols ? "true" : "false" );
 	PrintField( "removeFileExtension", config->removeFileExtension ? "true" : "false" );
 	PrintField( "warningsAsErrors", config->warningsAsErrors ? "true" : "false" );
+
+	// TODO(DM): 30/03/2026: how do we log OnPreBuild()/OnPostBuild() func ptrs?
 
 	string_builder_appendf( &builder, "}\n" );
 
@@ -251,6 +277,20 @@ const char *BuildConfig_GetFullBinaryName( const BuildConfig *config ) {
 	}
 
 	return string_builder_to_string( &sb );
+}
+
+// TODO(DM): 31/03/2026: does this mean we want a verbose logging mode in Core?
+void LogVerbose( const char *fmt, ... ) {
+	if ( !g_verbose ) {
+		return;
+	}
+
+	printf( "VERBOSE: " );
+
+	va_list args;
+	va_start( args, fmt );
+	vprintf( fmt, args );
+	va_end( args );
 }
 
 s32 RunProc( Array<const char *> *args, Array<const char *> *environmentVariables, const procFlags_t procFlags, String *outStdout ) {
@@ -315,14 +355,14 @@ static s32 ShowUsage( const s32 exitCode ) {
 		"Builder.exe\n"
 		"\n"
 		"USAGE:\n"
-		"    Builder.exe <file> [arguments]\n"
+		"    Builder.exe <file> [arguments] [custom arguments]\n"
 		"\n"
 		"Arguments:\n"
 		"    " ARG_HELP_SHORT "|" ARG_HELP_LONG " (optional):\n"
 		"        Shows this help and then exits.\n"
 		"\n"
 		"    " ARG_VERBOSE_SHORT "|" ARG_VERBOSE_LONG " (optional):\n"
-		"        Enables verbose logging, so more detailed information gets output when doing a build.\n"
+		"        Enables verbose logging, so a lot more information gets output.\n"
 		"\n"
 		"    <file> (required):\n"
 		"        The file you want to build with.  There can only be one.\n"
@@ -341,6 +381,10 @@ static s32 ShowUsage( const s32 exitCode ) {
 		"    " ARG_VISUAL_STUDIO_BUILD " (optional):\n"
 		"        Specifies that the build is being done from Visual Studio.\n"
 		"        So even if BuilderOptions::generateSolution is set to true in the build settings source file we shouldn't generate Visual Studio project files and instead should just do a build using the specified config.\n"
+		"\n"
+		"    [custom arguments] (optional):\n"
+		"        Any arguments not listed here are treated as custom arguments and passed through to your build source file via the CommandLineArgs parameter in " SET_BUILDER_OPTIONS_FUNC_NAME ".\n"
+		"        Use HasCommandLineArg( CommandLineArgs *, const char * ) to query for them.\n"
 		"\n"
 	);
 
@@ -363,6 +407,7 @@ static buildResult_t BuildBinary( buildContext_t *context, BuildConfig *config, 
 	}
 
 	if ( config->OnPreBuild ) {
+		LogVerbose( "Found a OnPreBuild() func ptr for BuildConfig: \"%s\".  Running...\n", config->name.c_str() );
 		config->OnPreBuild();
 	}
 
@@ -418,11 +463,13 @@ static buildResult_t BuildBinary( buildContext_t *context, BuildConfig *config, 
 	}
 
 	if ( context->consolidateCompilerArgs ) {
-		printf( "Building with the following command line options for each source file:\n" );
+		printf( "Compiling with the following command line options for each source file:\n" );
 		For ( u32, argIndex, 0, cmdArchetype.baseArgs.count ) {
 			printf( "%s ", cmdArchetype.baseArgs[argIndex] );
 		}
 		printf( "\n" );
+	} else {
+		printf( "Compiling:\n" );
 	}
 
 	if ( generateCompilationDatabase ) {
@@ -490,7 +537,7 @@ static buildResult_t BuildBinary( buildContext_t *context, BuildConfig *config, 
 			return BUILD_RESULT_SKIPPED;
 		}
 
-		printf( "\n" );
+		printf( "\nLinking:\n" );
 
 		if ( !compilerBackend->LinkIntermediateFiles( compilerBackend, intermediateFiles, config ) ) {
 			error( "Linking failed.\n" );
@@ -499,6 +546,7 @@ static buildResult_t BuildBinary( buildContext_t *context, BuildConfig *config, 
 	}
 
 	if ( config->OnPostBuild ) {
+		LogVerbose( "Found a OnPostBuild() func ptr for BuildConfig: \"%s\".  Running...\n", config->name.c_str() );
 		config->OnPostBuild();
 	}
 
@@ -507,7 +555,7 @@ static buildResult_t BuildBinary( buildContext_t *context, BuildConfig *config, 
 
 struct nukeContext_t {
 	Array<const char *>	subfolders;
-	bool8				verbose;
+	bool8				printDeletions;
 };
 
 static void Nuke_DeleteAllFilesAndCacheFoldersInternal( const FileInfo *fileInfo, void *user_data ) {
@@ -516,9 +564,7 @@ static void Nuke_DeleteAllFilesAndCacheFoldersInternal( const FileInfo *fileInfo
 	if ( fileInfo->is_directory ) {
 		context->subfolders.add( fileInfo->full_filename );
 	} else {
-		if ( context->verbose ) {
-			printf( "Deleting file \"%s\"\n", fileInfo->full_filename );
-		}
+		LogVerbose( "Deleting file \"%s\"\n", fileInfo->full_filename );
 
 		if ( !file_delete( fileInfo->full_filename ) ) {
 			error( "Nuke failed to delete file \"%s\".\n", fileInfo->full_filename );
@@ -526,9 +572,9 @@ static void Nuke_DeleteAllFilesAndCacheFoldersInternal( const FileInfo *fileInfo
 	}
 }
 
-bool8 NukeFolder( const char *folder, const bool8 deleteRootFolder, const bool8 verbose ) {
+bool8 NukeFolder( const char *folder, const bool8 deleteRootFolder, const bool8 printDeletions ) {
 	nukeContext_t nukeContext = {
-		.verbose = verbose
+		.printDeletions = printDeletions,
 	};
 
 	if ( !file_get_all_files_in_folder( folder, true, true, Nuke_DeleteAllFilesAndCacheFoldersInternal, &nukeContext ) ) {
@@ -541,7 +587,7 @@ bool8 NukeFolder( const char *folder, const bool8 deleteRootFolder, const bool8 
 	RFor ( u64, subfolderIndex, 0, nukeContext.subfolders.count ) {
 		const char *subfolder = nukeContext.subfolders[subfolderIndex];
 
-		if ( nukeContext.verbose ) {
+		if ( printDeletions ) {
 			printf( "Deleting folder \"%s\"\n", subfolder );
 		}
 
@@ -632,8 +678,6 @@ static std::vector<std::string> BuildConfig_GetAllSourceFiles( const buildContex
 
 	For ( u64, sourceFileIndex, 0, config->sourceFiles.size() ) {
 		const char *sourceFile = config->sourceFiles[sourceFileIndex].c_str();
-
-		const char *sourceFileNoPath = path_remove_path_from_file( sourceFile );
 
 		bool8 recursive = string_contains( sourceFile, "**" ) || string_contains( sourceFile, "/" );
 
@@ -1044,15 +1088,10 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 	core_init( MEM_MEGABYTES( 128 ) );	// TODO(DM): 26/03/2025: can we just use defaults for this now?
 	defer( core_shutdown() );
 
-	printf( "Builder v%d.%d.%d RC2\n\n", BUILDER_VERSION_MAJOR, BUILDER_VERSION_MINOR, BUILDER_VERSION_PATCH );
+	printf( "Builder v%d.%d.%d\n\n", BUILDER_VERSION_MAJOR, BUILDER_VERSION_MINOR, BUILDER_VERSION_PATCH );
 
 	buildContext_t context = {
 		.configIndices	= hashmap_create( 1 ),	// TODO(DM): 30/03/2025: whats a reasonable default here?
-#ifdef _DEBUG
-		.verbose		= true,
-#else
-		.verbose		= false,
-#endif
 	};
 
 	// parse command line args
@@ -1061,9 +1100,22 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 
 	bool8 isVisualStudioBuild = false;
 
-	CommandLineArgs args;
-	args.argc = argc;
-	args.argv = argv;
+	CommandLineArgs args = {
+		.argc = argc,
+		// .argv = argv,
+	};
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wcast-qual"
+	args.argv = cast( char **, mem_alloc( cast( u32, argc ) * sizeof( const char * ) ) );
+	For ( s32, argIndex, 0, argc ) {
+		args.argv[argIndex] = cast( char *, argv[argIndex] );
+	}
+#pragma clang diagnostic pop
+	defer(
+		mem_free( args.argv );
+		args.argv = NULL;
+	);
 
 	For ( s32, argIndex, firstArg, argc ) {
 		const char *arg = argv[argIndex];
@@ -1073,8 +1125,8 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 			return ShowUsage( 0 );
 		}
 
-		if ( string_equals( arg, ARG_VERBOSE_SHORT ) || string_equals( arg, ARG_HELP_LONG ) ) {
-			context.verbose = true;
+		if ( string_equals( arg, ARG_VERBOSE_SHORT ) || string_equals( arg, ARG_VERBOSE_LONG ) ) {
+			g_verbose = true;
 			continue;
 		}
 
@@ -1151,12 +1203,19 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 
 			continue;
 		}
-
-		// DM: given users can potentially now have their own arguments we probably dont want this anymore?
-		// unrecognised arg, show error
-		//error( "Unrecognised argument \"%s\".\n", arg );
-		//QUIT_ERROR();
 	}
+
+#ifdef _WIN32
+	if ( !Win_GetWindowsSDK( &context.winSDK ) ) {
+		QUIT_ERROR();
+	}
+
+	if ( !Win_GetMSVCInstall( &context.msvcInstall ) ) {
+		QUIT_ERROR();
+	}
+
+	printf( "\n" );
+#endif
 
 	// we need a source file specified at the command line
 	// otherwise we dont know what to build!
@@ -1194,7 +1253,7 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 	compilerBackend_t compilerBackend = {};
 	CreateCompilerBackend_Clang( &compilerBackend );
 	const char *defaultCompilerPath = tprintf( "%s%c..%cclang%cbin%cclang", path_remove_file_from_path( path_app_path() ), PATH_SEPARATOR, PATH_SEPARATOR, PATH_SEPARATOR, PATH_SEPARATOR );
-	compilerBackend.Init( &compilerBackend, defaultCompilerPath, std::string() );
+	compilerBackend.Init( &compilerBackend, &context, defaultCompilerPath, std::string() );
 	defer( compilerBackend.Shutdown( &compilerBackend ) );
 
 	// user config build step
@@ -1226,12 +1285,11 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 			},
 			.additionalLibs = {
 #if defined( _WIN64 )
-				"user32.lib",
-				// MSVCRT is needed for ABI compatibility between builder and the user config DLL on windows
+				"user32",
 #if defined( _DEBUG )
-				"msvcrtd.lib",
+				"msvcprtd",
 #else
-				"msvcrt.lib",
+				"msvcprt",
 #endif
 #endif
 			},
@@ -1267,6 +1325,8 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 				// if the user config DLL got rebuilt then compile settings might have changed
 				// force a rebuild of everything
 				context.forceRebuild = true;
+
+				LogVerbose( "User config build was successful.  All of the BuildConfigs we build from now on will be fully rebuilt...\n\n" );
 			} break;
 
 			case BUILD_RESULT_FAILED: {
@@ -1275,7 +1335,7 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 			} //break;
 
 			case BUILD_RESULT_SKIPPED: {
-				printf( "Skipped!\n" );
+				printf( "Skipped!\n\n" );
 		 	} break;
 		}
 
@@ -1288,8 +1348,7 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 	assertf( library.ptr, "Failed to load the user-config build DLL \"%s\".  This should never happen!\n", userConfigFullBinaryName );
 	defer( library_unload( &library ) );
 
-	typedef void ( *setBuilderOptionsFuncNew_t )( BuilderOptions *options, CommandLineArgs *args );
-	typedef void ( *setBuilderOptionsFunc_t )( BuilderOptions *options );
+	typedef void ( *setBuilderOptionsFunc_t )( BuilderOptions *options, CommandLineArgs *args );
 	typedef void ( *preBuildFunc_t )();
 	typedef void ( *postBuildFunc_t )();
 
@@ -1298,35 +1357,30 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 
 	// get the user-specified options
 	{
-		// DEPRECATED: we are moving away from SetBuilderOptions( BuilderOptions * ) to SetBuilderOptions( BuilderOptions *, CommandLineArgs * )
-		// it will get removed at a later date
-		setBuilderOptionsFuncNew_t setBuilderOptionsFuncNew = cast( setBuilderOptionsFuncNew_t, library_get_proc_address( library, SET_BUILDER_OPTIONS_FUNC_NAME ) );
 		setBuilderOptionsFunc_t setBuilderOptionsFunc = cast( setBuilderOptionsFunc_t, library_get_proc_address( library, SET_BUILDER_OPTIONS_FUNC_NAME ) );
 
 		float64 setBuilderOptionsTimeStart = time_ms();
 
-		// testing a new SetBuilderOptions function
-		// if that one exists, run that instead
-		if ( setBuilderOptionsFuncNew ) {
-			setBuilderOptionsFuncNew( &options, &args );
-		} else if ( setBuilderOptionsFunc ) {
-			warning(
-				"%s( BuilderOptions * ) is deprecated.\n"
-				"Change this function to %s( BuilderOptions *options, CommandLineArgs *args ) before this function is removed.\n"
-				, SET_BUILDER_OPTIONS_FUNC_NAME, SET_BUILDER_OPTIONS_FUNC_NAME
-			);
-			setBuilderOptionsFunc( &options );
+		if ( setBuilderOptionsFunc ) {
+			printf( "%s override function found.  Running...\n", SET_BUILDER_OPTIONS_FUNC_NAME );
+
+			setBuilderOptionsFunc( &options, &args );
+
+			printf( "%s override function Finished.\n\n", SET_BUILDER_OPTIONS_FUNC_NAME );
+		} else {
+			LogVerbose( "No %s override function was found.\n\n", SET_BUILDER_OPTIONS_FUNC_NAME );
 		}
 
-		if ( options.forceRebuild ) {
-			printf( "[Info] BuildOptions::forceRebuild is enabled. Forcing rebuild... \n" );
-			context.forceRebuild = true;
-		}
-
-			context.consolidateCompilerArgs = options.consolidateCompilerArgs;
+		context.forceRebuild |= options.forceRebuild;
+		context.consolidateCompilerArgs = options.consolidateCompilerArgs;
 
 		setBuilderOptionsTimeMS = time_ms() - setBuilderOptionsTimeStart;
 	}
+
+	std::vector<BuildConfig> configsToBuild;
+
+	Array<float64> configBuildTimes;
+	Array<buildResult_t> configBuildResults;
 
 	// if the user wants to generate a visual studio solution then only do that
 	if ( options.generateSolution && !isVisualStudioBuild ) {
@@ -1388,6 +1442,8 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 		// if the user asked for a specific compiler, set that now
 		// if the user never specified a compiler, we can build with the default compiler
 		if ( !options.compilerPath.empty() ) {
+			LogVerbose( "Found override compiler backend \"%s\" from %s.\n", options.compilerPath.c_str(), SET_BUILDER_OPTIONS_FUNC_NAME );
+
 			compilerBackend.Shutdown( &compilerBackend );
 
 			if ( string_ends_with( options.compilerPath.c_str(), ".exe" ) ) {
@@ -1430,7 +1486,7 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 			{
 				float64 compilerBackendInitStart = time_ms();
 
-				if ( !compilerBackend.Init( &compilerBackend, options.compilerPath.c_str(), options.compilerVersion.c_str() ) ) {
+				if ( !compilerBackend.Init( &compilerBackend, &context, options.compilerPath.c_str(), options.compilerVersion.c_str() ) ) {
 					QUIT_ERROR();
 				}
 
@@ -1458,6 +1514,8 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 
 		// if no configs were manually added then assume we are just doing a default build with no user-specified options
 		if ( options.configs.size() == 0 ) {
+			LogVerbose( "No BuildConfigs were found (either none were specified inside \"%s\" or that function was never defined), so Builder will now treat the input file specified at the command line as the source file you want to build.\n", SET_BUILDER_OPTIONS_FUNC_NAME );
+
 			BuildConfig config = {
 				.sourceFiles = { context.inputFile },
 				// .binaryName = defaultBinaryName
@@ -1536,6 +1594,9 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 			}
 		}
 
+		configBuildTimes.resize( configsToBuild.size() );
+		configBuildResults.resize( configsToBuild.size() );
+
 		if ( preBuildFunc ) {
 			printf( "Running pre-build code...\n" );
 
@@ -1572,13 +1633,11 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 			}
 
 			{
-				printf( "Building \"%s\"", config->binaryName.c_str() );
-
 				if ( !config->name.empty() ) {
-					printf( ", config \"%s\"", config->name.c_str() );
+					printf( "Building config \"%s\":\n", config->name.c_str() );
+				} else {
+					printf( "Building config:\n" );
 				}
-
-				printf( ":\n" );
 			}
 
 			// make all non-absolute additional include paths relative to the build source file
@@ -1602,31 +1661,31 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 			// get all the "compilation units" that we are actually going to give to the compiler
 			// if no source files were added in SetBuilderOptions() then assume they only want to build the same file as the one specified via the command line
 			if ( config->sourceFiles.size() == 0 ) {
+				LogVerbose( "No source files were detected in BuildConfig \"%s\".  Builder will assume that the source file you specified at the command line (\"%s\") is what you want to build with.\n", config->name.c_str(), context.inputFile );
+
 				config->sourceFiles.push_back( context.inputFile );
 			} else {
 				// otherwise the user told us to build other source files, so go find and build those instead
 				// keep this as a std::vector because this gets fed back into BuilderOptions::sourceFiles
-				std::vector<std::string> finalSourceFilesToBuild = BuildConfig_GetAllSourceFiles( &context, config );
+				config->sourceFiles = BuildConfig_GetAllSourceFiles( &context, config );
 
 				// at this point its totally acceptable for finalSourceFilesToBuild to be empty
 				// this is because the compiler should be the one that tells the user they specified no valid source files to build with
 				// the compiler can and will throw an error for that, so let it
-
-				config->sourceFiles = finalSourceFilesToBuild;
 			}
 
 			// now do the actual build
 			{
 				float64 buildTimeStart = time_ms();
 
-				buildResult_t buildResult = BuildBinary( &context, config, &compilerBackend, options.generateCompilationDatabase );
+				configBuildResults[configToBuildIndex] = BuildBinary( &context, config, &compilerBackend, options.generateCompilationDatabase );
 
-				float64 buildTimeEnd = time_ms();
+				configBuildTimes[configToBuildIndex] = time_ms() - buildTimeStart;
 
-				switch ( buildResult ) {
+				switch ( configBuildResults[configToBuildIndex] ) {
 					case BUILD_RESULT_SUCCESS:
 						numSuccessfulBuilds++;
-						printf( "Finished building \"%s\", %f ms\n\n", config->binaryName.c_str(), buildTimeEnd - buildTimeStart );
+						printf( "Finished building \"%s\", %f ms\n\n", config->binaryName.c_str(), configBuildTimes[configToBuildIndex] );
 						break;
 
 					case BUILD_RESULT_FAILED:
@@ -1666,26 +1725,44 @@ int BuilderMain( const int firstArg, int argc, char **argv ) {
 		}
 	}
 
+	// build summary
 	{
 		using namespace hlml;
 
-		printf( "Finished:\n" );
-		if ( !doubleeq( userConfigBuildTimeMS, -1.0 ) ) {
-			printf( "    User config build:  %f ms%s\n", userConfigBuildTimeMS, ( userConfigBuildResult == BUILD_RESULT_SKIPPED ) ? " (skipped)" : "" );
-		}
-		if ( !doubleeq( compilerBackendInitTimeMS, -1.0 ) ) {
-			printf( "    Compiler init time: %f ms\n", compilerBackendInitTimeMS );
-		}
-		if ( !doubleeq( setBuilderOptionsTimeMS, -1.0 ) ) {
-			printf( "    SetBuilderOptions:  %f ms\n", setBuilderOptionsTimeMS );
-		}
+		struct buildSummaryLine_t {
+			const char		*description;
+			const float64	timeMS;
+			const char		*suffix;	// can be NULL
+		};
+
+		Array<buildSummaryLine_t> buildSummaryLines;
+		buildSummaryLines.add( { "User config build",  userConfigBuildTimeMS, ( userConfigBuildResult == BUILD_RESULT_SKIPPED ) ? "(skipped)" : "" } );
+		buildSummaryLines.add( { "Compiler init time", compilerBackendInitTimeMS } );
+		buildSummaryLines.add( { "SetBuilderOptions",  setBuilderOptionsTimeMS } );
 		if ( options.generateSolution && !isVisualStudioBuild ) {
-			printf( "    Generate solution:  %f ms\n", visualStudioGenerationTimeMS );
+			buildSummaryLines.add( { "Generate solution", visualStudioGenerationTimeMS } );
 		}
 		if ( options.generateTenxWorkspace) {
 			printf( "    Generate 10x Workspace:  %f ms\n", TenXEditorGenerationTimeMS );
 		}
-		printf( "    Total time:         %f ms\n", time_ms() - totalTimeStart );
+		For ( u32, configIndex, 0, configsToBuild.size() ) {
+			buildSummaryLines.add( { tprintf( "Build \"%s\"", configsToBuild[configIndex].name.c_str() ), configBuildTimes[configIndex], ( configBuildResults[configIndex] == BUILD_RESULT_SKIPPED ) ? "(skipped)" : "" } );
+		}
+
+		u32 lineLength = 0;
+		For ( u32, i, 0, buildSummaryLines.count ) {
+			lineLength = max( lineLength, cast( u32, strlen( buildSummaryLines[i].description ) ) );
+		}
+
+		printf( "Finished:\n" );
+		For ( u32, lineIndex, 0, buildSummaryLines.count ) {
+			buildSummaryLine_t *line = &buildSummaryLines[lineIndex];
+
+			if ( !doubleeq( line->timeMS, -1.0 ) ) {
+				printf( "    %-*s: %f ms %s\n", lineLength, line->description, line->timeMS, line->suffix ? line->suffix : "" );
+			}
+		}
+		printf( "    %-*s: %f ms\n", lineLength, "Total time", time_ms() - totalTimeStart );
 		printf( "\n" );
 	}
 

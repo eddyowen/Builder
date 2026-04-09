@@ -1,16 +1,56 @@
-v0.10.4, <RELEASE DATE HERE>:
+v0.11.3, <RELEASE DATE HERE>:
+
+* Fixed a bug where modifying your build source file would not trigger a full rebuild of the config (and its dependencies).
+* Fixed a bug where the --verbose command line argument was not working.
+* ShowUsage() now mentions custom command line arguments and how to use them.
+
+----------------------------------------------------------------
+
+v0.11.2, 03/04/2026:
+
+* Windows:
+	* Fixed Builder selecting an older MSVC installation over a newer one when multiple Visual Studio installations are present.
+		* When enumerating installations, Builder was validating each version's include and lib paths against whichever installation happened to be enumerated last, rather than the one the version actually belonged to.
+		* This caused newer versions (e.g. from VS 2022) to be skipped and an older one (e.g. VS 2019 Build Tools) to be used instead.
+* BuildConfig::additionalLibs no longer requires file extensions on Windows.
+	* Builder now automatically appends .lib to all entries in additionalLibs when building on Windows.
+	* NOTE: If you were already specifying .lib extensions in additionalLibs, you must remove them or your build will break.
+
+----------------------------------------------------------------
+
+v0.11.1, 02/04/2026:
+
+* Windows:
+	* Fixed a crash that could happen if you had multiple Visual Studio installations.
+		* When using Builder's Clang backend, Clang was being called as the linker driver, which caused it to auto-detect your Visual Studio installations and try to invoke their link.exe.
+		* If that link.exe wasn't on your PATH, the build would fail with a cryptic "program not executable" error.
+		* Builder now calls link.exe directly itself, so it is no longer affected by whatever Clang decides to detect on your machine.
+	* If MSVC isn't installed on your machine, Builder now shows a clear error telling you to install it via the Visual Studio Installer or the MS Build Tools, rather than showing a raw error code and moving on.
+		* HRESULT codes from Windows COM calls are now also shown in hex, as God intended.
+	* Windows SDK and MSVC installation queries are now deferred until after command line arguments are parsed, so -v/--verbose is correctly respected during those steps.
+* Put a bunch more information into verbose logging (-v, --verbose):
+	* User feedback highlighted that this had gone ignored for a while.
+	* From now on, verbose mode will start to log everything and the kitchen sink.
+	* This version is simply a first pass, more stuff will get logged in future.
+
+----------------------------------------------------------------
+
+v0.11.0, 30/03/2026:
 
 * Added support for user-defined command line arguments.
 	* You can now pass your own custom arguments to Builder on the command line and check for them inside your build scripts.
-	* When running Builder you can now pass your own command line arguments, which you can then check for inside SetBuilderOptions.
-	* SetBuilderOptions( BuilderOptions * ) is now deprecated in favour of SetBuilderOptions( BuilderOptions *, CommandLineArgs * ).
-		* A deprecation warning will fire if you try to use the "old" SetBuilderOptions function.  It will be fully removed in a later release.
+	* Your SetBuilderOptions should now have the function signature: SetBuilderOptions( BuilderOptions *options, CommandLineArgs *args ).
 	* The function HasCommandLineArg( CommandLineArgs *, const char * ) has also been added.
 * Added BuildConfig::OnPreBuild and BuildConfig::OnPostBuild.
-	* People wanted things to happen before/after a specific config had been built, so here you go.
+* Fixed a bug where Builder would silently fail if your Windows SDK installation was malformed.
+	* Apparently, Clang doesn't come with some of its own CRT headers and relies on the Windows SDK for this.
+	* So now Builder does the following for a Clang or MSVC build on Windows:
+		* Finds the latest available Windows SDK installation, and throws an error if one can't be found.
+		* Includes the ucrt, um, and shared include and lib folders for a build on Windows.
 * Added BuildConfig::intermediateFolder.
 	* This is relative to BuildConfig::binaryFolder.
 	* If this is unset, Builder will put intermediate files in the same folder as BuildConfig::binaryFolder.
+* The build times for all BuildConfigs now also get shown in the build summary when the build finishes.
 
 ----------------------------------------------------------------
 

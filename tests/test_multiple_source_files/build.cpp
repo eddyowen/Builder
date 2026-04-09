@@ -1,6 +1,10 @@
 #include <builder.h>
 
-static void GetBuildConfigs( BuilderOptions *options ) {
+#include "../test_compiler_override.h"
+
+BUILDER_CALLBACK void SetBuilderOptions( BuilderOptions* options, CommandLineArgs* args ) {
+	ApplyCompilerOverride( options, args );
+
 	BuildConfig config = {
 		.binaryFolder	= "bin",
 		.binaryName		= "marco_polo",

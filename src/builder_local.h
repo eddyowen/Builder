@@ -30,6 +30,10 @@ SOFTWARE.
 
 #include "../include/builder.h"
 
+// TODO(DM): 01/04/2026: we only need this is because buildContext_t needs windowsSDK_t and msvcInstall_t
+// can we keep those there without needing this include to do it? header files shouldn't include other header files (unless it's core_types.h or something like that)!
+#include "win_support.h"
+
 #include "core/include/core_types.h"
 #include "core/include/array.h"
 #include "core/include/core_string.h"
@@ -76,7 +80,7 @@ struct compilationCommandArchetype_t {
 struct compilerBackend_t {
 	void	*data;
 
-	bool8	( *Init )( compilerBackend_t *backend, const std::string &compilerPath, const std::string &compilerVersion );
+	bool8	( *Init )( compilerBackend_t *backend, const buildContext_t *context, const std::string &compilerPath, const std::string &compilerVersion );
 	void	( *Shutdown )( compilerBackend_t *backend );
 	bool8	( *CompileSourceFile )( compilerBackend_t *backend, buildContext_t *buildContext, BuildConfig *config, compilationCommandArchetype_t &commandArchetype, const char *sourceFile, bool recordCompilation );
 	bool8	( *LinkIntermediateFiles )( compilerBackend_t *backend, const Array<const char *> &intermediateFiles, BuildConfig *config );
@@ -113,19 +117,26 @@ struct buildContext_t {
 
 	bool8									forceRebuild;
 	bool8									consolidateCompilerArgs;
-	bool8									verbose;
 	std::vector<compilationDatabaseEntry_t>	compilationDatabase;
+
+#ifdef _WIN32
+	windowsSDK_t							winSDK;
+	msvcInstall_t							msvcInstall;
+#endif
 };
+
+extern bool8	g_verbose;
 
 // shared entry point
 // used in the actual builder program
 // also used by tests so they dont have to start a separate subprocess to build
-// TODO(DM): 04/02/2026: do args want to be const?
-int			BuilderMain( const int firstArg, int argc, char **argv );
+int			BuilderMain( const int firstArg, int argc, const char * const * argv );
+
+void		LogVerbose( const char *fmt, ... );
 
 u64			GetLastFileWriteTime( const char *filename );
 
-bool8		NukeFolder( const char *folder, const bool8 deleteRootFolder, const bool8 verbose );
+bool8		NukeFolder( const char *folder, const bool8 deleteRootFolder, const bool8 printDeletions );
 
 const char	*GetNextSlashInPath( const char *path );
 
@@ -136,10 +147,7 @@ const char	*GetFileExtensionFromBinaryType( const BinaryType type );
 
 const char	*BuildConfig_GetFullBinaryName( const BuildConfig *config );
 
-void		RecordCompilationDatabaseEntry(
-			buildContext_t *buildContext,
-			const char *sourceFileName,
-			const Array<const char *> &compilationCommandArray );
+void		RecordCompilationDatabaseEntry( buildContext_t *buildContext, const char *sourceFileName, const Array<const char *> &compilationCommandArray );
 
 s32			RunProc( Array<const char *> *args, Array<const char *> *environmentVariables, const procFlags_t procFlags = 0, String *outStdout = NULL );
 

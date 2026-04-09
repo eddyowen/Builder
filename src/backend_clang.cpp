@@ -28,6 +28,10 @@ SOFTWARE.
 
 #include "builder_local.h"
 
+#ifdef _WIN32
+#include "win_support.h"
+#endif
+
 #include "core/include/core_string.h"
 #include "core/include/debug.h"
 #include "core/include/string_helpers.h"
@@ -49,6 +53,11 @@ struct clangState_t {
 	String						compilerVersion;
 	String						linkerPath;
 	String						arPath;	// static library linker for gcc (on windows and linux) and clang (linux)
+
+#ifdef _WIN32
+	windowsSDK_t				winSDK;
+	msvcInstall_t				msvcInstall;
+#endif
 };
 
 // TODO(DM): 20/07/2025: do we want to ignore this warning via the build script?
@@ -187,7 +196,11 @@ static void ResolveCompilerAndLinkerPaths( clangState_t *clangState, const char 
 
 //================================================================
 
-static bool8 Clang_Init( compilerBackend_t *backend, const std::string &compilerPath, const std::string &compilerVersion ) {
+static bool8 Clang_Init( compilerBackend_t *backend, const buildContext_t *context, const std::string &compilerPath, const std::string &compilerVersion ) {
+#ifdef __linux__
+	unused( context );
+#endif
+
 	backend->data = cast( clangState_t *, mem_alloc( sizeof( clangState_t ) ) );
 	new( backend->data ) clangState_t;
 
@@ -214,10 +227,19 @@ static bool8 Clang_Init( compilerBackend_t *backend, const std::string &compiler
 	string_printf( &clangState->arPath, "%s%c%s", pathToCompiler, PATH_SEPARATOR, linkerExe );
 #endif
 
+#ifdef _WIN32
+	clangState->winSDK = context->winSDK;
+	clangState->msvcInstall = context->msvcInstall;
+#endif
+
 	return true;
 }
 
-static bool8 GCC_Init( compilerBackend_t *backend, const std::string &compilerPath, const std::string &compilerVersion ) {
+static bool8 GCC_Init( compilerBackend_t *backend, const buildContext_t *context, const std::string &compilerPath, const std::string &compilerVersion ) {
+	// TODO(DM): 01/04/2026: clang and msvc need this for windows SDK includes, but gcc never will
+	// can we do better here?
+	unused( context );
+
 	backend->data = cast( clangState_t *, mem_alloc( sizeof( clangState_t ) ) );
 	new( backend->data ) clangState_t;
 
@@ -304,46 +326,92 @@ static bool8 Clang_LinkIntermediateFiles( compilerBackend_t *backend, const Arra
 
 	clangState_t *clangState = cast( clangState_t *, backend->data );
 
-	// TODO(DM): 11/02/2026: remove this when eds command archetype changes get merged in
-	bool8 isClang = string_ends_with( clangState->compilerPath.data, "clang" ) || string_ends_with( clangState->compilerPath.data, "clang++" );
-	bool8 isGCC = string_ends_with( clangState->compilerPath.data, "gcc" ) || string_ends_with( clangState->compilerPath.data, "g++" );
-
 	const char *fullBinaryName = BuildConfig_GetFullBinaryName( config );
 
 	Array<const char *> &args = clangState->args;
 	args.reserve(
-		1 + // lld-link
-		1 + // /lib or -shared
-		1 + // -g
-		1 + // -o
-		1 + // binary name
+		1 + // lib.exe or link.exe
+		1 + // verbose flag
+		1 + // /DLL
+		1 + // /NODEFAULTLIB
+		1 + // /DEBUG
+		1 + // /OUT:
+		1 + // kernel32.lib
+		3 + // CRT libs (msvcrt, vcruntime, ucrt)
+		3 + // /LIBPATH: ucrt, um, msvc
 		intermediateFiles.count +
 		config->additionalLibPaths.size() +
-		config->additionalLibs.size()
+		config->additionalLibs.size() +
+		config->additionalLinkerArguments.size()
 	);
 
 	args.reset();
 
+#ifdef _WIN32
+	//args.add( clangState->linkerPath.data );
+	if ( config->binaryType == BINARY_TYPE_STATIC_LIBRARY ) {
+		args.add( tprintf( "%s\\bin\\Hostx64\\x64\\lib", clangState->msvcInstall.rootFolder.data ) );
+	} else {
+		args.add( tprintf( "%s\\bin\\Hostx64\\x64\\link", clangState->msvcInstall.rootFolder.data ) );
+
+		args.add( "/NODEFAULTLIB" );
+	}
+
+	if ( g_verbose ) {
+		args.add( "/verbose" );
+	}
+
+	if ( config->binaryType == BINARY_TYPE_DYNAMIC_LIBRARY ) {
+		args.add( "/DLL" );
+	}
+
+	if ( config->binaryType != BINARY_TYPE_STATIC_LIBRARY && !config->removeSymbols ) {
+		args.add( "/DEBUG" );
+	}
+
+	args.add( tprintf( "/OUT:%s", fullBinaryName ) );
+
+	args.add_range( &intermediateFiles );
+
+	args.add( tprintf( "/LIBPATH:%s", clangState->winSDK.ucrtLibPath.data ) );
+	args.add( tprintf( "/LIBPATH:%s", clangState->winSDK.umLibPath.data ) );
+	args.add( tprintf( "/LIBPATH:%s", clangState->msvcInstall.libPath.data ) );
+
+	For ( u32, libPathIndex, 0, config->additionalLibPaths.size() ) {
+		args.add( tprintf( "/LIBPATH:%s", config->additionalLibPaths[libPathIndex].c_str() ) );
+	}
+
+	args.add( "kernel32.lib" );
+
+#if defined( _DEBUG )
+	args.add( "msvcrtd.lib" );
+	args.add( "vcruntimed.lib" );
+	args.add( "ucrtd.lib" );
+#else
+	args.add( "msvcrt.lib" );
+	args.add( "vcruntime.lib" );
+	args.add( "ucrt.lib" );
+#endif
+
+	For ( u32, libIndex, 0, config->additionalLibs.size() ) {
+		args.add( tprintf( "%s%s", config->additionalLibs[libIndex].c_str(), GetFileExtensionFromBinaryType( BINARY_TYPE_STATIC_LIBRARY ) ) );
+	}
+
+	For ( u32, libIndex, 0, config->additionalLinkerArguments.size() ) {
+		args.add( config->additionalLinkerArguments[libIndex].c_str() );
+	}
+#else
 	// clang and gcc treat static libraries as just an archive of .o files
 	// so there is no real "link" step in this case, the .o files are just "archived" together
 	// for dynamic libraries and executables clang and gcc recommend you call the compiler again and just pass in all the intermediate files
 	if ( config->binaryType == BINARY_TYPE_STATIC_LIBRARY ) {
-#if defined( _WIN32 )
-		// TODO(DM): 11/02/2026: remove this when eds command archetype changes get merged in
-		if ( isGCC ) {
-			args.add( clangState->arPath.data );
-			args.add( "rc" );
-			args.add( fullBinaryName );
-		} else {
-			args.add( clangState->linkerPath.data );
-			args.add( "/lib" );
-			args.add( tprintf( "/OUT:%s", fullBinaryName ) );
-		}
-#elif defined( __linux__ )
 		args.add( clangState->arPath.data );
 		args.add( "rc" );
 		args.add( fullBinaryName );
-#endif
+
+		if ( g_verbose ) {
+			args.add( "-v" );
+		}
 
 		args.add_range( &intermediateFiles );
 	} else {
@@ -357,11 +425,117 @@ static bool8 Clang_LinkIntermediateFiles( compilerBackend_t *backend, const Arra
 			args.add( "-g" );
 		}
 
+		if ( g_verbose ) {
+			args.add( "-v" );
+		}
+
 		args.add_range( &intermediateFiles );
 
 		For ( u32, libPathIndex, 0, config->additionalLibPaths.size() ) {
 			args.add( tprintf( "-L%s", config->additionalLibPaths[libPathIndex].c_str() ) );
 		}
+
+#ifdef _WIN32
+		args.add( tprintf( "-L%s", clangState->winSDK.ucrtLibPath.data ) );
+		args.add( tprintf( "-L%s", clangState->winSDK.umLibPath.data ) );
+#endif
+
+		// on windows we already know the extension is going to be .lib, so we can add that ourselves
+		// on linux the file extension could be either .a or .so depending on whether the library we are linking to is a static or dynamic library, respectively
+		// so on linux make the user specify the file extension themselves
+		For ( u32, libIndex, 0, config->additionalLibs.size() ) {
+#ifdef _WIN32
+			args.add( tprintf( "-l%s%s", config->additionalLibs[libIndex].c_str(), GetFileExtensionFromBinaryType( BINARY_TYPE_STATIC_LIBRARY ) ) );
+#else
+			args.add( tprintf( "-l%s", config->additionalLibs[libIndex].c_str() ) );
+#endif
+		}
+
+		For ( u32, libIndex, 0, config->additionalLinkerArguments.size() ) {
+			args.add( config->additionalLinkerArguments[libIndex].c_str() );
+		}
+
+		// TODO(DM): 09/10/2025: this works fine but do we want to expose this to the user?
+		// or do we want to just do this by default on linux because its a really common thing that people do?
+#ifdef __linux__
+		if ( config->binaryType == BINARY_TYPE_EXE ) {
+			const char *fullBinaryPath = path_remove_file_from_path( fullBinaryName );
+			args.add( tprintf( "-Wl,-rpath=%s", fullBinaryPath ) );
+		}
+#endif
+
+		args.add( "-o" );
+		args.add( fullBinaryName );
+	}
+#endif
+
+	s32 exitCode = RunProc( &args, NULL, PROC_FLAG_SHOW_ARGS | PROC_FLAG_SHOW_STDOUT );
+
+	return exitCode == 0;
+}
+
+static bool8 GCC_LinkIntermediateFiles( compilerBackend_t *backend, const Array<const char *> &intermediateFiles, BuildConfig *config ) {
+	assert( backend );
+	assert( config );
+
+	clangState_t *clangState = cast( clangState_t *, backend->data );
+
+	const char *fullBinaryName = BuildConfig_GetFullBinaryName( config );
+
+	Array<const char *> &args = clangState->args;
+	args.reserve(
+		1 + // lld-link
+		1 + // verbose flag
+		1 + // /lib or -shared
+		1 + // -g
+		1 + // -o
+		1 + // binary name
+		intermediateFiles.count +
+		config->additionalLibPaths.size() +
+		config->additionalLibs.size() +
+		config->additionalLinkerArguments.size()
+	);
+
+	args.reset();
+
+	// clang and gcc treat static libraries as just an archive of .o files
+	// so there is no real "link" step in this case, the .o files are just "archived" together
+	// for dynamic libraries and executables clang and gcc recommend you call the compiler again and just pass in all the intermediate files
+	if ( config->binaryType == BINARY_TYPE_STATIC_LIBRARY ) {
+		args.add( clangState->arPath.data );
+		args.add( "rc" );
+		args.add( fullBinaryName );
+
+		if ( g_verbose ) {
+			args.add( "-v" );
+		}
+
+		args.add_range( &intermediateFiles );
+	} else {
+		args.add( clangState->compilerPath.data );
+
+		if ( config->binaryType == BINARY_TYPE_DYNAMIC_LIBRARY ) {
+			args.add( "-shared" );
+		}
+
+		if ( !config->removeSymbols ) {
+			args.add( "-g" );
+		}
+
+		if ( g_verbose ) {
+			args.add( "-v" );
+		}
+
+		args.add_range( &intermediateFiles );
+
+		For ( u32, libPathIndex, 0, config->additionalLibPaths.size() ) {
+			args.add( tprintf( "-L%s", config->additionalLibPaths[libPathIndex].c_str() ) );
+		}
+
+// #ifdef _WIN32
+// 		args.add( tprintf( "-L%s", clangState->winSDK.ucrtLibPath.data ) );
+// 		args.add( tprintf( "-L%s", clangState->winSDK.umLibPath.data ) );
+// #endif
 
 		For ( u32, libIndex, 0, config->additionalLibs.size() ) {
 			args.add( tprintf( "-l%s", config->additionalLibs[libIndex].c_str() ) );
@@ -409,6 +583,7 @@ static bool8 Clang_GetCompilationCommandArchetype( const compilerBackend_t *back
 	Array<const char *> &baseArgs = outCmdArchetype.baseArgs;
 	baseArgs.reserve(
 		1 +	// compiler path
+		1 +	// verbose flag
 		1 +	// compile flag
 		1 +	// lang version flag
 		1 +	// symbols flag
@@ -424,6 +599,10 @@ static bool8 Clang_GetCompilationCommandArchetype( const compilerBackend_t *back
 
 	// Compiler Path
 	baseArgs.add( compilerPath );
+
+	if ( g_verbose ) {
+		baseArgs.add( "-v" );
+	}
 
 	// Compile Flag
 	baseArgs.add( "-c" );
@@ -445,6 +624,13 @@ static bool8 Clang_GetCompilationCommandArchetype( const compilerBackend_t *back
 	For ( u32, defineIndex, 0, definesCount ) {
 		baseArgs.add( tprintf( "-D%s", config->defines[defineIndex].c_str() ) );
 	}
+
+// #ifdef _WIN32
+// 	// windows SDK includes
+// 	baseArgs.add( tprintf( "-isystem%s", clangState->winSDK.ucrtInclude.data ) );
+// 	baseArgs.add( tprintf( "-isystem%s", clangState->winSDK.umInclude.data ) );
+// 	baseArgs.add( tprintf( "-isystem%s", clangState->winSDK.sharedInclude.data ) );
+// #endif
 
 	// Additional Includes
 	For ( u32, includeIndex, 0, additionalIncludesCount ) {
@@ -622,7 +808,7 @@ void CreateCompilerBackend_GCC( compilerBackend_t *outBackend ) {
 		.Init										= GCC_Init,
 		.Shutdown									= Clang_Shutdown,
 		.CompileSourceFile							= Clang_CompileSourceFile,
-		.LinkIntermediateFiles						= Clang_LinkIntermediateFiles,
+		.LinkIntermediateFiles						= GCC_LinkIntermediateFiles,
 		.GetCompilationCommandArchetype				= Clang_GetCompilationCommandArchetype,
 		.GetIncludeDependenciesFromSourceFileBuild	= Clang_GetIncludeDependenciesFromSourceFileBuild,
 		.GetCompilerPath							= Clang_GetCompilerPath,
