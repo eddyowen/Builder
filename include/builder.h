@@ -87,7 +87,7 @@ enum OptimizationLevel {
 enum Compiler {
 	COMPILER_DEFAULT = 0,
 	COMPILER_CLANG,
-	COMPILER_GCC, 
+	COMPILER_GCC,
 	COMPILER_MSVC
 };
 

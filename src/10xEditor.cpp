@@ -29,6 +29,7 @@
 #include "builder_local.h"
 
 #ifdef _WIN32
+#include "win_support.h"
 #include "core/include/debug.h"
 #include "core/include/allocation_context.h"
 #include "core/include/array.inl"
@@ -55,93 +56,6 @@ constexpr std::string_view BoolToString( const bool8 value )
 	return value ? "true" : "false";
 }
 
-
-struct WindowsSDK {
-	std::string path;
-	std::string version;
-};
-
-static std::vector<int> ParseWindowsSDKVersion( const std::string& version ) {
-	std::vector<int> parts;
-	std::stringstream ss( version );
-	std::string part;
-	while ( std::getline( ss, part, '.') )
-		parts.push_back( std::stoi(part) );
-	return parts;
-}
-
-static bool IsNewerVersion( const WindowsSDK& a, const WindowsSDK& b ) {
-	auto partsA = ParseWindowsSDKVersion( a.version );
-	auto partsB = ParseWindowsSDKVersion( b.version );
-	return partsA > partsB;
-}
-
-static std::vector<WindowsSDK> GetInstalledSDKs() {
-	HKEY rootKey;
-	if ( RegOpenKeyExA( HKEY_LOCAL_MACHINE, R"(SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots)", 0, KEY_READ, &rootKey ) != ERROR_SUCCESS )
-		return {};
-
-	// Read the root path ONCE from the root key
-	char rootPath[MAX_PATH];
-	DWORD pathSize = sizeof( rootPath );
-
-	// No SDK root found
-	if ( RegQueryValueExA( rootKey, "KitsRoot10", nullptr, nullptr, ( LPBYTE )rootPath, &pathSize ) != ERROR_SUCCESS ) {
-		RegCloseKey( rootKey );
-		return {};
-	}
-
-	std::vector<WindowsSDK> sdks;
-	char versionName[64];
-	DWORD index = 0, nameSize = sizeof(versionName);
-
-	while ( RegEnumKeyExA( rootKey, index++, versionName, &nameSize, nullptr, nullptr, nullptr, nullptr ) == ERROR_SUCCESS ) {
-		// Verify only SDKs within Include/ at ../Windows Kits/10/
-		const char* sdkPath = tprintf( "%s%s%c%s", rootPath, "Include", PATH_SEPARATOR, versionName );
-		if( folder_exists( sdkPath ) ) {
-			
-			const char* ucrtPath = tprintf( "%s%s%c%s%c%s", rootPath, "Include", PATH_SEPARATOR, versionName, PATH_SEPARATOR, "ucrt" );
-			const char* umPath 	 = tprintf( "%s%s%c%s%c%s", rootPath, "Include", PATH_SEPARATOR, versionName, PATH_SEPARATOR, "um" );
-
-			// Only consider valid SDKs that contain at least these 2 folders
-			if( folder_exists( ucrtPath ) && folder_exists( umPath ) ) {
-				sdks.push_back( { rootPath, versionName } );
-			}
-		}
-
-		nameSize = sizeof( versionName );
-	}
-
-	RegCloseKey( rootKey );
-	return sdks;
-	return {};
-}
-
-static std::string GetVisualStudioInstallationPath()
-{
-	std::string vsInstallationPath;
-	String vswhereStdout;
-
-	Array<const char *> args;
-	args.add( "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe" );
-	args.add( "-latest" );
-	args.add( "-property" );
-	args.add( "installationPath" );
-	s32 exitCode = RunProc( &args, NULL, 0, &vswhereStdout );
-
-	// fail test if vswhere errors
-	if ( exitCode != 0 ) {
-		return vsInstallationPath;
-	}
-	
-	if ( string_ends_with( vswhereStdout.data, "\r\n" ) ) {
-		string_substring(vswhereStdout.data, 0, strlen(vswhereStdout.data) - (strlen("\r\n") - 1), vswhereStdout.data );
-	}
-
-	vsInstallationPath = vswhereStdout.data;
-	return vsInstallationPath;
-}
-
 static const std::vector<std::string> GetUserCompilerDefines( const TenxWorkspace& workspace, Compiler compiler ) {
 	const std::vector<TenxCompiler>& compilers = workspace.compilers;
 	auto it = std::find_if( compilers.begin(), compilers.end(), [&compiler]( const TenxCompiler& lhs ) {
@@ -162,7 +76,6 @@ bool8 GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options ) 
 	assert( context->inputFile );
 	assert( context->inputFilePath.data );
 	assert( options );
-
 	
 	const std::vector<BuildConfig>& buildConfigs  = options->configs;
 
@@ -255,59 +168,40 @@ bool8 GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options ) 
 
 	string_builder_appendf( &workspaceContent, "\t\t<AdditionalIncludePaths>\n" );
 
-	const std::string vsInstallationPath = GetVisualStudioInstallationPath();
-	if ( !vsInstallationPath.empty() ) {
-		char* fileContent = nullptr;
-		u64 fileLength;
+	const char* additionalIncludeBaseFmt = "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n";
+	
+	// MSVC Install
+	msvcInstall_t msvcInstall;
+	Win_GetMSVCInstall( &msvcInstall );
 
-		const char* vsToolsVersionRelativePath = R"(VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt)";
-		const char* toolsVersionFilename = tprintf( "%s%c%s", vsInstallationPath.c_str(), PATH_SEPARATOR, vsToolsVersionRelativePath );
-
-		if ( file_read_entire( toolsVersionFilename, &fileContent, &fileLength, true ) ) {
-			// Safe as VCToolsVersion.default.txt always contains only 1 entry
-			std::string msvcVersion = std::string( fileContent ).substr( 0, strlen( fileContent ) - strlen( "\r\n" ) );
-
-			string_builder_appendf(
-				&workspaceContent,
-				"\t\t\t<AdditionalIncludePath>%s%c%s%c%s%c%s</AdditionalIncludePath>\n",
-				vsInstallationPath.c_str(),
-				PATH_SEPARATOR,
-				path_canonicalise("VC/Tools/MSVC"),
-				PATH_SEPARATOR,
-				msvcVersion.c_str(),
-				PATH_SEPARATOR,
-				"include"
-			);
-
-			string_builder_appendf( &workspaceContent, "\t\t\t<AdditionalIncludePath>%s%c%s</AdditionalIncludePath>\n", vsInstallationPath.c_str(), PATH_SEPARATOR, path_canonicalise("VC/Auxiliary/VS/include" ) );
-		}
+	if ( msvcInstall.includePath.data ) {
+		string_builder_appendf( &workspaceContent, additionalIncludeBaseFmt, msvcInstall.includePath.data );
 	}
 
 	// Windows SDK include paths (if any)
-	std::vector<WindowsSDK> windowsSDKs = GetInstalledSDKs();
-	if ( windowsSDKs.size() > 0 ) {
-		std::sort( windowsSDKs.begin(), windowsSDKs.end(), IsNewerVersion );
-		// Use the latest installation only
-		const WindowsSDK& sdk 	= windowsSDKs[0];
-		const char* sdkPath 	= sdk.path.c_str();
-		const char* sdkVersion 	= sdk.version.c_str();
-		
-		// sdk.path.c_str() here already contains the trailing "\", so no PATH_SEPARATOR needed
-		const char* additionalIncludeFmt = "\t\t\t<AdditionalIncludePath>%s%s%c%s%c%s</AdditionalIncludePath>\n";
-		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "Include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "ucrt"		);
-		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "Include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "um"		);
-		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "Include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "shared"	);
-		string_builder_appendf( &workspaceContent, additionalIncludeFmt, sdkPath, "Include", PATH_SEPARATOR, sdkVersion, PATH_SEPARATOR, "cppwinrt"	);
+	windowsSDK_t sdk;
+	Win_GetWindowsSDK( &sdk );
+
+	if ( sdk.ucrtInclude.data ) {
+		string_builder_appendf( &workspaceContent, additionalIncludeBaseFmt, sdk.ucrtInclude.data );
+	}
+
+	if ( sdk.umInclude.data ) {
+		string_builder_appendf( &workspaceContent, additionalIncludeBaseFmt, sdk.umInclude.data );
+	}
+
+	if ( sdk.sharedInclude.data ) {
+		string_builder_appendf( &workspaceContent, additionalIncludeBaseFmt, sdk.sharedInclude.data );
 	}
 
 	const char* builderIncludePath = tprintf( "%s%c..%cinclude", builderExePath, PATH_SEPARATOR, PATH_SEPARATOR );
-	string_builder_appendf( &workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", builderIncludePath );
+	string_builder_appendf( &workspaceContent, additionalIncludeBaseFmt, builderIncludePath );
 	
 	const char* builderClangIncludePath = tprintf( "%s%c..%c%s", builderExePath, PATH_SEPARATOR, PATH_SEPARATOR, path_canonicalise("clang/include") );
-	string_builder_appendf( &workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", builderClangIncludePath );
+	string_builder_appendf( &workspaceContent, additionalIncludeBaseFmt, builderClangIncludePath );
 
-	const char* builderClangIncludePath2 = tprintf( "%s%c..%c%s", builderExePath, PATH_SEPARATOR, PATH_SEPARATOR, path_canonicalise("clang/lib/clang/20/include" ) );
-	string_builder_appendf( &workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", builderClangIncludePath2 );
+	const char* builderClangLibIncludePath = tprintf( "%s%c..%c%s", builderExePath, PATH_SEPARATOR, PATH_SEPARATOR, path_canonicalise("clang/lib/clang/20/include" ) );
+	string_builder_appendf( &workspaceContent, additionalIncludeBaseFmt, builderClangLibIncludePath );
 
 	std::unordered_set<std::string> uniqueConfigIncludes;
 	for ( const BuildConfig& config : buildConfigs ) {
@@ -316,7 +210,7 @@ bool8 GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options ) 
 	}
 
 	for ( const std::string& entry : uniqueConfigIncludes ) {
-		string_builder_appendf( &workspaceContent, "\t\t\t<AdditionalIncludePath>%s</AdditionalIncludePath>\n", path_canonicalise( entry.c_str() ) );
+		string_builder_appendf( &workspaceContent, additionalIncludeBaseFmt, path_canonicalise( entry.c_str() ) );
 	}
 
 	string_builder_appendf( &workspaceContent, "\t\t</AdditionalIncludePaths>\n" );
