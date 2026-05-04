@@ -56,7 +56,7 @@ constexpr std::string_view BoolToString( const bool8 value )
 	return value ? "true" : "false";
 }
 
-static const std::vector<std::string> GetUserCompilerDefines( const TenxWorkspace& workspace, Compiler compiler ) {
+static const std::vector<std::string> GetUserCompilerDefines( const TenxWorkspaceOptions& workspace, Compiler compiler ) {
 	const std::vector<TenxCompiler>& compilers = workspace.compilers;
 	auto it = std::find_if( compilers.begin(), compilers.end(), [&compiler]( const TenxCompiler& lhs ) {
 		return lhs.id == compiler;
@@ -79,7 +79,7 @@ bool8 GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options ) 
 	
 	const std::vector<BuildConfig>& buildConfigs  = options->configs;
 
-	const TenxWorkspace& workspace 				  = options->tenxWorkspace;
+	const TenxWorkspaceOptions& workspace 		  = options->tenxOptions;
 
 	const std::string& name						  = workspace.name;
 	const std::string& outputPath 				  = workspace.outputPath;

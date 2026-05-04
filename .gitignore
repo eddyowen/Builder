@@ -41,6 +41,16 @@ x64
 #
 .idea
 
+#
+# 10x stuff
+#
+*.10x
+
+#
+# 10x stuff
+#
+*.raddbg_project
+*.raddbg_project.*
 
 #
 # claude stuff
