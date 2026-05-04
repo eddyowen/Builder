@@ -502,7 +502,7 @@ struct BuilderOptions {
 	ZedJSONOptions				zedJSONOptions;
 
 	// If 'generateTenxWorkspace' is enabled, Builder will use these settings when filling them in.
-	TenxWorkspaceOptions 		tenxOptions;
+	TenxWorkspaceOptions 		tenxWorkspaceOptions;
 
 	// Set this to true if you want Builder to force-rebuild your program.
 	// All binaries and intermediate files will get rebuilt.
@@ -691,4 +691,3 @@ static void AddBuildConfigUnique( BuildConfig *config, std::vector<BuildConfig> 
 #ifdef __linux__
 #pragma clang diagnostic pop
 #endif // __linux__
-

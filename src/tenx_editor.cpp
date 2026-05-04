@@ -79,7 +79,7 @@ bool8 GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options ) 
 	
 	const std::vector<BuildConfig>& buildConfigs  = options->configs;
 
-	const TenxWorkspaceOptions& workspace 		  = options->tenxOptions;
+	const TenxWorkspaceOptions& workspace 		  = options->tenxWorkspaceOptions;
 
 	const std::string& name						  = workspace.name;
 	const std::string& outputPath 				  = workspace.outputPath;
