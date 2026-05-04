@@ -27,14 +27,16 @@ scripts/build.sh release
 **Windows:**
 ```bash
 scripts/build_tests.bat debug
-./bin/tests_main
+cd tests && ../bin/builder_tests_debug
 ```
 
 **Linux:**
 ```bash
 scripts/build_tests.sh debug
-./bin/tests_main
+cd tests && ../bin/builder_tests_debug
 ```
+
+Tests **must** be run from the `tests/` directory — the test paths are relative to it.
 
 ### Create a release
 
@@ -86,6 +88,17 @@ Clang backend uses `-MMD` to emit `.d` dependency files per translation unit. On
 ### Config dependencies
 
 `BuildConfig` has a `dependsOn` field. Builder resolves the dependency graph and builds prerequisite configs (e.g., a static library) before the config that depends on them.
+
+## Workflow
+
+When fixing a bug, adding a new feature, removing a user-facing feature, or deprecating anything, always update `doc/CHANGELOG.txt` under the current unreleased version at the top of the file.
+
+After making any code changes, always build and run the tests before reporting the work as done:
+
+```bash
+scripts/build_tests.sh debug
+cd tests && ../bin/builder_tests_debug
+```
 
 ## Code conventions
 

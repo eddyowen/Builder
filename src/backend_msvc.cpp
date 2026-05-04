@@ -56,31 +56,13 @@ struct msvcState_t {
 
 //================================================================
 
-static const char *LanguageVersionToCompilerArg( const LanguageVersion languageVersion ) {
-	switch ( languageVersion ) {
-		case LANGUAGE_VERSION_C89:		return "/std:c89";
-		case LANGUAGE_VERSION_C99:		return "/std:c99";
-		case LANGUAGE_VERSION_C11:		return "/std:c11";
-		case LANGUAGE_VERSION_C17:		return "/std:c17";
-		case LANGUAGE_VERSION_C23:		return "/std:c23";
-		case LANGUAGE_VERSION_CPP11:	return "/std:c++11";
-		case LANGUAGE_VERSION_CPP14:	return "/std:c++14";
-		case LANGUAGE_VERSION_CPP17:	return "/std:c++17";
-		case LANGUAGE_VERSION_CPP20:	return "/std:c++20";
-		case LANGUAGE_VERSION_CPP23:	return "/std:c++23";
-	}
-
-	assert( false && "Bad LanguageVersion passed.\n" );
-
-	return NULL;
-}
 
 static const char *OptimizationLevelToCompilerArg( const OptimizationLevel level ) {
 	switch ( level ) {
 		case OPTIMIZATION_LEVEL_O0:	return "/Od";
 		case OPTIMIZATION_LEVEL_O1:	return "/O1";
 		case OPTIMIZATION_LEVEL_O2:	return "/O2";
-		case OPTIMIZATION_LEVEL_O3:	return "/O2";	// DM!!! 22/07/2025: whats the real answer here?
+		case OPTIMIZATION_LEVEL_O3:	return "/O2";
 	}
 
 	assert( false && "Bad OptimizationLevel passed.\n" );
@@ -113,10 +95,13 @@ static bool8 MSVC_Init( compilerBackend_t *backend, const buildContext_t *contex
 	if ( string_equals( compilerPath.c_str(), "cl" ) || string_equals( compilerPath.c_str(), "cl.exe" ) ) {
 		string_printf( &msvcState->compilerPath, "%s\\bin\\Hostx64\\x64\\cl", context->msvcInstall.rootFolder.data );
 		string_printf( &msvcState->linkerPath, "%s\\bin\\Hostx64\\x64\\link", context->msvcInstall.rootFolder.data );
-
-		msvcState->microsoftCoreIncludes.push_back( context->msvcInstall.includePath.data );
-		msvcState->microsoftCoreLibPaths.push_back( context->msvcInstall.libPath.data );
+	} else {
+		const char *compilerDir = path_remove_file_from_path( compilerPath.c_str() );
+		string_printf( &msvcState->linkerPath, "%s\\link", compilerDir );
 	}
+
+	msvcState->microsoftCoreIncludes.push_back( context->msvcInstall.includePath.data );
+	msvcState->microsoftCoreLibPaths.push_back( context->msvcInstall.libPath.data );
 
 	return true;
 }
@@ -140,8 +125,6 @@ static bool8 MSVC_CompileSourceFile(
 
 	const char *sourceFileNoPath = path_remove_path_from_file( sourceFile );
 	const char *sourceFileNoExtension = path_remove_file_extension( sourceFileNoPath );
-
-	config->additionalIncludes.emplace_back( "." );
 
 	msvcState_t *msvcState = cast( msvcState_t *, backend->data );
 
@@ -223,7 +206,7 @@ static bool8 MSVC_CompileSourceFile(
 	return exitCode == 0;
 }
 
-static bool8 MSVC_LinkIntermediateFiles( compilerBackend_t *backend, const Array<const char *> &intermediateFiles, BuildConfig *config ) {
+static bool8 MSVC_LinkIntermediateFiles( compilerBackend_t *backend, const Array<const char *> &intermediateFiles, BuildConfig *config, const BuilderOptions *options ) {
 	assert( backend );
 	assert( config );
 
@@ -235,6 +218,7 @@ static bool8 MSVC_LinkIntermediateFiles( compilerBackend_t *backend, const Array
 		1 +	// link
 		1 +	// /lib or /shared
 		1 +	// /DEBUG
+		1 + // /NODEFAULTLIB
 		1 +	// /OUT:<name>
 		intermediateFiles.count +
 		msvcState->microsoftCoreLibPaths.size() +
@@ -244,6 +228,9 @@ static bool8 MSVC_LinkIntermediateFiles( compilerBackend_t *backend, const Array
 
 	args.reset();
 
+	// TODO(DM): 30/04/2026: this is a repetition of the windows path of Clang_LinkIntermediateFiles
+	// so we need to start splitting backend files down by compiler and linker
+	// and then unify the linker codepaths on windows when calling either clang or msvc
 	args.add( msvcState->linkerPath.data );
 
 	if ( config->binaryType == BINARY_TYPE_STATIC_LIBRARY ) {
@@ -252,8 +239,12 @@ static bool8 MSVC_LinkIntermediateFiles( compilerBackend_t *backend, const Array
 		args.add( "/DLL" );
 	}
 
-	if ( !config->removeSymbols ) {
+	if ( !config->removeSymbols && config->binaryType != BINARY_TYPE_STATIC_LIBRARY ) {
 		args.add( "/DEBUG" );
+	}
+
+	if ( options && options->noDefaultLibs ) {
+		args.add( "/NODEFAULTLIB" );
 	}
 
 	args.add( tprintf( "/OUT:%s", fullBinaryName ) );
@@ -314,7 +305,7 @@ static bool8 MSVC_GetCompilationCommandArchetype( const compilerBackend_t *backe
 
 	// Language Version
 	if ( config->languageVersion != LANGUAGE_VERSION_UNSET ) {
-		baseArgs.add( LanguageVersionToCompilerArg( config->languageVersion ) );
+		baseArgs.add( tprintf( "/std:%s", LanguageVersionToString( config->languageVersion ) ) );
 	}
 
 	// Symbols Flag
@@ -323,6 +314,13 @@ static bool8 MSVC_GetCompilationCommandArchetype( const compilerBackend_t *backe
 	}
 
 	// Optimization Level
+	if ( config->optimizationLevel == OPTIMIZATION_LEVEL_O3 ) {
+		static bool8 warned = false;
+		if ( !warned ) {
+			warning( "MSVC doesn't have optimization level /O3. /O2 is the maximum. Defaulting to that instead...\n" );
+			warned = true;
+		}
+	}
 	baseArgs.add( OptimizationLevelToCompilerArg( config->optimizationLevel ) );
 
 	// Diagnostics Flag

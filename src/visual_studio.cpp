@@ -137,14 +137,6 @@ static void VS_DeleteOldProjectFilesCallback( const FileInfo *fileInfo, void *us
 	}
 }
 
-static void VS_NukeDotVSFolder( const FileInfo *fileInfo, void *userData ) {
-	unused( userData );
-
-	if ( !file_delete( fileInfo->full_filename ) ) {
-		warning( "Failed to delete old Visual Studio file \"%s\" while deleting old Visual Studio files.  You will have to delete this one yourself.  Sorry.\n", fileInfo->full_filename );
-	}
-}
-
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunreachable-code"
 
@@ -254,7 +246,7 @@ bool8 GenerateVisualStudioSolution( buildContext_t *context, BuilderOptions *opt
 	char *pathFromSolutionToInputFile = cast( char *, mem_temp_alloc( MAX_PATH * sizeof( char ) ) );
 	memset( pathFromSolutionToInputFile, 0, MAX_PATH * sizeof( char ) );
 	pathFromSolutionToInputFile = path_relative_path_to( visualStudioProjectFilesPath, context->inputFilePath.data );
-	assert( pathFromSolutionToInputFile != NULL || !string_equals( pathFromSolutionToInputFile, "" ) );
+	assert( pathFromSolutionToInputFile != NULL && !string_equals( pathFromSolutionToInputFile, "" ) );
 
 	// give each project a guid
 	Array<const char *> projectGuids;
@@ -270,21 +262,6 @@ bool8 GenerateVisualStudioSolution( buildContext_t *context, BuilderOptions *opt
 
 		return false;
 	}
-
-	auto WriteStringBuilderToFile = []( StringBuilder *stringBuilder, const char *filename ) -> bool8 {
-		const char *msg = string_builder_to_string( stringBuilder );
-		const u64 msgLength = strlen( msg );
-		bool8 written = file_write_entire( filename, msg, msgLength );
-
-		if ( !written ) {
-			errorCode_t errorCode = get_last_error_code();
-			error( "Failed to write \"%s\": " ERROR_CODE_FORMAT ".\n", filename, errorCode );
-
-			return false;
-		}
-
-		return true;
-	};
 
 	std::vector<std::string> defaultFileExtensions = {
 		"c", "cpp", "cc", "cxx", "h", "hpp", "inl"

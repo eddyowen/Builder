@@ -60,30 +60,6 @@ struct clangState_t {
 #endif
 };
 
-// TODO(DM): 20/07/2025: do we want to ignore this warning via the build script?
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wswitch"
-
-static const char *LanguageVersionToCompilerArg( const LanguageVersion languageVersion ) {
-	assert( languageVersion != LANGUAGE_VERSION_UNSET );
-
-	switch ( languageVersion ) {
-		case LANGUAGE_VERSION_C89:		return "-std=c89";
-		case LANGUAGE_VERSION_C99:		return "-std=c99";
-		case LANGUAGE_VERSION_C11:		return "-std=c11";
-		case LANGUAGE_VERSION_C17:		return "-std=c17";
-		case LANGUAGE_VERSION_C23:		return "-std=c23";
-		case LANGUAGE_VERSION_CPP11:	return "-std=c++11";
-		case LANGUAGE_VERSION_CPP14:	return "-std=c++14";
-		case LANGUAGE_VERSION_CPP17:	return "-std=c++17";
-		case LANGUAGE_VERSION_CPP20:	return "-std=c++20";
-		case LANGUAGE_VERSION_CPP23:	return "-std=c++23";
-	}
-
-	return NULL;
-}
-
-#pragma clang diagnostic pop
 
 static const char *OptimizationLevelToCompilerArg( const OptimizationLevel level ) {
 	switch ( level ) {
@@ -95,6 +71,8 @@ static const char *OptimizationLevelToCompilerArg( const OptimizationLevel level
 }
 
 static void ReadDependencyFile( const char *depFilename, std::vector<std::string> &outIncludeDependencies ) {
+	LogVerbose( "Parsing dependency file \"%s\"...\n", depFilename );
+
 	char *depFileBuffer = NULL;
 
 	if ( !file_read_entire( depFilename, &depFileBuffer ) ) {
@@ -159,9 +137,10 @@ static void ReadDependencyFile( const char *depFilename, std::vector<std::string
 			}
 		}
 
-		// get the file timestamp
-		//u64 lastWriteTime = GetLastFileWriteTime( dependencyFilename.c_str() );
-		//printf( "Parsing dependency %s, last write time = %llu\n", dependencyFilename.c_str(), lastWriteTime );
+		{
+			u64 lastWriteTime = GetLastFileWriteTime( dependencyFilename.c_str() );
+			LogVerbose( " - Found dependency %s, last write time = %llu\n", dependencyFilename.c_str(), lastWriteTime );
+		}
 
 		outIncludeDependencies.push_back( dependencyFilename.c_str() );
 
@@ -180,6 +159,8 @@ static void ReadDependencyFile( const char *depFilename, std::vector<std::string
 			current += 1;
 		}
 	}
+
+	LogVerbose( "Finished parsing dependency file \"%s\"...\n", depFilename );
 }
 
 static void ResolveCompilerAndLinkerPaths( clangState_t *clangState, const char *compilerPath, const char *compilerName, const char *linkerName ) {
@@ -320,9 +301,10 @@ static bool8 Clang_CompileSourceFile(
 	return exitCode == 0;
 }
 
-static bool8 Clang_LinkIntermediateFiles( compilerBackend_t *backend, const Array<const char *> &intermediateFiles, BuildConfig *config ) {
+static bool8 Clang_LinkIntermediateFiles( compilerBackend_t *backend, const Array<const char *> &intermediateFiles, BuildConfig *config, const BuilderOptions *options ) {
 	assert( backend );
 	assert( config );
+	// assert( options );
 
 	clangState_t *clangState = cast( clangState_t *, backend->data );
 
@@ -337,7 +319,7 @@ static bool8 Clang_LinkIntermediateFiles( compilerBackend_t *backend, const Arra
 		1 + // /DEBUG
 		1 + // /OUT:
 		1 + // kernel32.lib
-		3 + // CRT libs (msvcrt, vcruntime, ucrt)
+		4 + // CRT libs (e.g. msvcrt, msvcprt, vcruntime, ucrt when -D_DLL and NOT -D_DEBUG)
 		3 + // /LIBPATH: ucrt, um, msvc
 		intermediateFiles.count +
 		config->additionalLibPaths.size() +
@@ -347,6 +329,9 @@ static bool8 Clang_LinkIntermediateFiles( compilerBackend_t *backend, const Arra
 
 	args.reset();
 
+	// TODO(DM): 30/04/2026: this is a repetition of MSVC_LinkIntermediateFiles
+	// so we need to start splitting backend files down by compiler and linker
+	// and then unify the linker codepaths on windows when calling either clang or msvc
 #ifdef _WIN32
 	//args.add( clangState->linkerPath.data );
 	if ( config->binaryType == BINARY_TYPE_STATIC_LIBRARY ) {
@@ -381,17 +366,52 @@ static bool8 Clang_LinkIntermediateFiles( compilerBackend_t *backend, const Arra
 		args.add( tprintf( "/LIBPATH:%s", config->additionalLibPaths[libPathIndex].c_str() ) );
 	}
 
-	args.add( "kernel32.lib" );
+	if ( !options || !options->noDefaultLibs ) {
+		args.add( "kernel32.lib" );
 
-#if defined( _DEBUG )
-	args.add( "msvcrtd.lib" );
-	args.add( "vcruntimed.lib" );
-	args.add( "ucrtd.lib" );
-#else
-	args.add( "msvcrt.lib" );
-	args.add( "vcruntime.lib" );
-	args.add( "ucrt.lib" );
-#endif
+		// these defines are what drive the choice of lib windows std compiles against
+		bool8 debugBuild = false;
+		bool8 hasDllRuntime = false;
+		For ( u32, i, 0, config->defines.size() ) {
+			if ( config->defines[i] == "_DEBUG" ) {
+				debugBuild = true;
+			}
+			if ( config->defines[i] == "_DLL" ) {
+				hasDllRuntime = true;
+			}
+		}
+
+		// static library doesn't pass /NODEFAULTLIB so we don't need to supply it ourselves
+		if ( config->binaryType != BINARY_TYPE_STATIC_LIBRARY ) {
+			if( debugBuild ) {
+				if ( hasDllRuntime ) {
+				args.add( "msvcrtd.lib" );
+				args.add( "msvcprtd.lib" );
+				args.add( "vcruntimed.lib" );
+				args.add( "ucrtd.lib" );
+				}
+				else {
+					args.add( "libcmtd.lib" );
+					args.add( "libcpmtd.lib" );
+					args.add( "libvcruntimed.lib" );
+					args.add( "libucrtd.lib" );
+				}
+			} else {
+				if ( hasDllRuntime ) {
+					args.add( "msvcrt.lib" );
+					args.add( "msvcprt.lib" );
+					args.add( "vcruntime.lib" );
+					args.add( "ucrt.lib" );
+				}
+				else {
+					args.add( "libcmt.lib" );
+					args.add( "libcpmt.lib" );
+					args.add( "libvcruntime.lib" );
+					args.add( "libucrt.lib" );
+				}
+			}
+		}
+	}
 
 	For ( u32, libIndex, 0, config->additionalLibs.size() ) {
 		args.add( tprintf( "%s%s", config->additionalLibs[libIndex].c_str(), GetFileExtensionFromBinaryType( BINARY_TYPE_STATIC_LIBRARY ) ) );
@@ -440,6 +460,12 @@ static bool8 Clang_LinkIntermediateFiles( compilerBackend_t *backend, const Arra
 		args.add( tprintf( "-L%s", clangState->winSDK.umLibPath.data ) );
 #endif
 
+#ifdef __linux__
+		if ( !options || !options->noDefaultLibs ) {
+			args.add( "-lstdc++" );
+		}
+#endif
+
 		// on windows we already know the extension is going to be .lib, so we can add that ourselves
 		// on linux the file extension could be either .a or .so depending on whether the library we are linking to is a static or dynamic library, respectively
 		// so on linux make the user specify the file extension themselves
@@ -474,7 +500,7 @@ static bool8 Clang_LinkIntermediateFiles( compilerBackend_t *backend, const Arra
 	return exitCode == 0;
 }
 
-static bool8 GCC_LinkIntermediateFiles( compilerBackend_t *backend, const Array<const char *> &intermediateFiles, BuildConfig *config ) {
+static bool8 GCC_LinkIntermediateFiles( compilerBackend_t *backend, const Array<const char *> &intermediateFiles, BuildConfig *config, const BuilderOptions *options ) {
 	assert( backend );
 	assert( config );
 
@@ -487,6 +513,7 @@ static bool8 GCC_LinkIntermediateFiles( compilerBackend_t *backend, const Array<
 		1 + // lld-link
 		1 + // verbose flag
 		1 + // /lib or -shared
+		1 + // -nodefaultlibs
 		1 + // -g
 		1 + // -o
 		1 + // binary name
@@ -520,6 +547,10 @@ static bool8 GCC_LinkIntermediateFiles( compilerBackend_t *backend, const Array<
 
 		if ( !config->removeSymbols ) {
 			args.add( "-g" );
+		}
+
+		if ( options && options->noDefaultLibs ) {
+			args.add( "-nodefaultlibs" );
 		}
 
 		if ( g_verbose ) {
@@ -609,7 +640,7 @@ static bool8 Clang_GetCompilationCommandArchetype( const compilerBackend_t *back
 
 	// Language Version
 	if ( config->languageVersion != LANGUAGE_VERSION_UNSET ) {
-		baseArgs.add( LanguageVersionToCompilerArg( config->languageVersion ) );
+		baseArgs.add( tprintf( "-std=%s", LanguageVersionToString( config->languageVersion ) ) );
 	}
 
 	// Symbols Flag
@@ -746,6 +777,16 @@ static String GCC_GetCompilerVersion( compilerBackend_t *backend ) {
 	args.add( clangState->compilerPath.data );
 	args.add( "-v" );
 
+	// DM: defined around it for now because I need to test on Windows before I remove it
+	// but this is working on Linux so its looking good so far
+#define CALL_RUN_PROC 1
+
+#if CALL_RUN_PROC
+	String gccOutputString;
+	s32 exitCode = RunProc( &args, NULL, 0, &gccOutputString );
+
+	const char *versionStart = strstr( gccOutputString.data, gccVersionPrefix );
+#else
 	Process *process = process_create( &args, NULL, PROCESS_FLAG_ASYNC | PROCESS_FLAG_COMBINE_STDOUT_AND_STDERR );
 
 	if ( !process ) {
@@ -759,7 +800,7 @@ static String GCC_GetCompilerVersion( compilerBackend_t *backend ) {
 
 	char buffer[1024] = {};
 	u64 bytesRead = U64_MAX;
-	while ( ( bytesRead = process_read_stdout( process, buffer, 1024 ) ) ) {
+	while ( ( bytesRead = process_read_stdout( process, buffer, count_of( buffer ) - 1 ) ) ) {
 		buffer[bytesRead] = 0;
 
 		string_builder_appendf( &gccOutput, "%s", buffer );
@@ -768,6 +809,7 @@ static String GCC_GetCompilerVersion( compilerBackend_t *backend ) {
 	const char *gccOutputString = string_builder_to_string( &gccOutput );
 
 	const char *versionStart = strstr( gccOutputString, gccVersionPrefix );
+#endif
 
 	if ( versionStart ) {
 		versionStart += strlen( gccVersionPrefix );
@@ -780,10 +822,12 @@ static String GCC_GetCompilerVersion( compilerBackend_t *backend ) {
 		string_copy_from_c_string( &compilerVersion, versionStart, versionLength );
 	}
 
+#if !CALL_RUN_PROC
 	process_join( process );
 
 	process_destroy( process );
 	process = NULL;
+#endif
 
 	return compilerVersion.data;
 }

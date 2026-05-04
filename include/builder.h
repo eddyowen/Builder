@@ -81,7 +81,7 @@ enum OptimizationLevel {
 	OPTIMIZATION_LEVEL_O0	= 0,
 	OPTIMIZATION_LEVEL_O1,
 	OPTIMIZATION_LEVEL_O2,
-	OPTIMIZATION_LEVEL_O3,
+	OPTIMIZATION_LEVEL_O3,	// MSVC has no /O3 equivalent; Builder will throw a warning telling you this and fall back to /O2.
 };
 
 enum Compiler {
@@ -246,6 +246,169 @@ struct VisualStudioSolution {
 	std::string							path;
 };
 
+struct VSCodeTaskConfig {
+	// The config you want Builder to build through VS Code.
+	BuildConfig					config;
+
+	// Any additional args you want to send to Builder when building this config.
+	std::vector<std::string>	additionalBuildArgs;
+};
+
+enum VSCodeDebuggerType {
+	VSCODE_DEBUGGER_TYPE_UNSET			= 0,
+	VSCODE_DEBUGGER_TYPE_CPPDBG_GDB,	// Linux/Mac: cppdbg with MIMode gdb
+	VSCODE_DEBUGGER_TYPE_CPPDBG_LLDB,	// Linux/Mac: cppdbg with MIMode lldb
+	VSCODE_DEBUGGER_TYPE_CPPVSDBG,		// Windows: cppvsdbg (MSVC debugger)
+};
+
+// Builder does not currently support MacOS, so there are no MacOS IntelliSense modes here.
+enum VSCodeIntelliSenseMode {
+	VSCODE_INTELLISENSE_MODE_UNSET				= 0,
+	VSCODE_INTELLISENSE_MODE_LINUX_CLANG_X64,
+	VSCODE_INTELLISENSE_MODE_LINUX_CLANG_X86,
+	VSCODE_INTELLISENSE_MODE_LINUX_CLANG_ARM64,
+	VSCODE_INTELLISENSE_MODE_LINUX_CLANG_ARM,
+	VSCODE_INTELLISENSE_MODE_LINUX_GCC_X64,
+	VSCODE_INTELLISENSE_MODE_LINUX_GCC_X86,
+	VSCODE_INTELLISENSE_MODE_LINUX_GCC_ARM64,
+	VSCODE_INTELLISENSE_MODE_LINUX_GCC_ARM,
+	VSCODE_INTELLISENSE_MODE_WINDOWS_MSVC_X64,
+	VSCODE_INTELLISENSE_MODE_WINDOWS_MSVC_X86,
+	VSCODE_INTELLISENSE_MODE_WINDOWS_MSVC_ARM64,
+	VSCODE_INTELLISENSE_MODE_WINDOWS_MSVC_ARM,
+	VSCODE_INTELLISENSE_MODE_WINDOWS_CLANG_X64,
+	VSCODE_INTELLISENSE_MODE_WINDOWS_CLANG_X86,
+};
+
+struct VSCodeDebuggerPlatformConfig {
+	// The MI debug mode to use on this platform. E.g. "gdb" or "lldb".
+	std::string	miMode;
+
+	// The path to the debugger on this platform. E.g. "/usr/bin/gdb".
+	std::string	miDebuggerPath;
+};
+
+struct VSCodeSetupCommand {
+	std::string	description;
+	std::string	text;
+	bool		ignoreFailures;
+};
+
+struct VSCodeLaunchConfig {
+	// The config you want to run when you select this launch config in VS Code.
+	std::string								binaryName;
+
+	// When you run this config, what command line arguments do you want to be passed through?
+	std::vector<std::string>				args;
+
+	// You'd never guess, but this sets the "cwd" field in a VS Code launch config.
+	// This defaults to '${workspaceFolder}'.
+	std::string								cwd;
+
+	// Which VS Code debugger to use for this launch config.
+	// Defaults to VSCODE_DEBUGGER_TYPE_CPPDBG_GDB if unset.
+	VSCodeDebuggerType						debuggerType;
+
+	// Platform-specific debugger config for Linux.
+	// When set, Builder emits a "linux": { ... } block with MIMode and miDebuggerPath
+	// instead of putting MIMode at the top level of the config.
+	VSCodeDebuggerPlatformConfig			linuxDebugger;
+
+	// Platform-specific debugger config for Windows.
+	// When set, Builder emits a "windows": { ... } block with MIMode and miDebuggerPath
+	// instead of putting MIMode at the top level of the config.
+	VSCodeDebuggerPlatformConfig			windowsDebugger;
+
+	// GDB/LLDB MI commands to send to the debugger during initialisation,
+	// before attaching to or launching the program.
+	std::vector<VSCodeSetupCommand>			setupCommands;
+};
+
+struct VSCodeCppPropertiesConfig {
+	// Overrides config.name as the configuration name in c_cpp_properties.json.
+	// Use this when the same BuildConfig is needed for multiple platforms/compilers
+	// (e.g. one entry named "Linux" and one named "Win32" from the same config).
+	// If empty, config.name is used.
+	std::string				name;
+
+	// The config from which Builder extracts the IntelliSense settings.
+	// Builder uses: config.additionalIncludes (includePath), config.defines,
+	// and config.languageVersion (cStandard or cppStandard).
+	BuildConfig				config;
+
+	// The IntelliSense mode to use.
+	// If unset, the "intelliSenseMode" field is omitted from the output.
+	VSCodeIntelliSenseMode	intelliSenseMode;
+};
+
+struct VSCodeJSONOptions {
+	// The path to the Builder executable that VS Code will invoke when running a task.
+	// If left empty, defaults to "builder", which assumes Builder is on your PATH.
+	// If you/your team doesn't put Builder on PATH, set this to wherever it lives (e.g. "${workspaceFolder}/tools/builder").
+	std::string								builderPath;
+
+	// The configs that will go into c_cpp_properties.json.
+	// Builder will also use BuilderOptions::compilerPath for the "compilerPath" field.
+	std::vector<VSCodeCppPropertiesConfig>	cppPropertiesConfigs;
+
+	// The configs that will go into tasks.json.
+	std::vector<VSCodeTaskConfig>			taskConfigs;
+
+	// The configs that will go into launch.json.
+	std::vector<VSCodeLaunchConfig>			launchConfigs;
+};
+
+struct ZedTaskConfig {
+	// The config you want Builder to build through Zed.
+	BuildConfig					config;
+
+	// When you run this config, what command line arguments do you want to be passed through?
+	std::vector<std::string>	args;
+};
+
+enum ZedDebuggerAdapter {
+	ZED_DEBUGGER_ADAPTER_CODELLDB	= 0,
+	ZED_DEBUGGER_ADAPTER_GDB,
+};
+
+enum ZedDebuggerRequest {
+	ZED_DEBUGGER_REQUEST_LAUNCH	= 0,
+	ZED_DEBUGGER_REQUEST_ATTACH,
+};
+
+struct ZedDebugConfig {
+	std::string					label;
+
+	std::string					binaryName;
+
+	// When you run this config, what command line arguments do you want to be passed through?
+	std::vector<std::string>	args;
+
+	// You'd never guess, but this sets the "cwd" field in a Zed debug config.
+	// This defaults to '${ZED_WORKTREE_ROOT}'.
+	std::string					cwd;
+
+	// Which debugger adapter do you want to use?
+	ZedDebuggerAdapter			adapter;
+
+	// When you run this debug config, do you want to launch the executable or attach to it?
+	ZedDebuggerRequest			request;
+};
+
+struct ZedJSONOptions {
+	// The path to the Builder executable that VS Code will invoke when running a task.
+	// If left empty, defaults to "builder", which assumes Builder is on your PATH.
+	// If you/your team doesn't put Builder on PATH, set this to wherever it lives
+	// (e.g. "${ZED_WORKTREE_ROOT}/tools/builder").
+	std::string					builderPath;
+
+	// The configs that will go into tasks.json.
+	std::vector<ZedTaskConfig>	taskConfigs;
+
+	// The configs that will go into debug.json.
+	std::vector<ZedDebugConfig>	debugConfigs;
+};
+
 // Platform representation in 10x Workspace's Settings. List of defines per platform. Only used as hints for 10x's parser.
 struct TenxPlatform {
 	std::string 				name;
@@ -260,7 +423,7 @@ struct TenxCompiler {
 
 // 10x Editor's Workspace representation. Workspace settings in 10x are used to provide hints to the parser and to setup build/launch/clean commands. 
 // They won't affect your build. 
-struct TenxWorkspace
+struct TenxWorkspaceOptions
 {
 	// List of defines per platform
 	std::vector<TenxPlatform> 	platforms;
@@ -332,8 +495,14 @@ struct BuilderOptions {
 	// If you don't use Visual Studio then ignore this.
 	VisualStudioSolution		solution;
 
-	// Struct that holds additional used to generate 10x Editor Workspaces. Ignored if 'generateCompilationDatabase' flag is set to 'false'.
-	TenxWorkspace 				tenxWorkspace;
+	// If 'generateVSCodeJSONFiles' is enabled, Builder will use these settings when filling them in.
+	VSCodeJSONOptions			vsCodeJSONOptions;
+
+	// If 'generateZedJSONFiles' is enabled, Builder will use these settings when filling them in.
+	ZedJSONOptions				zedJSONOptions;
+
+	// If 'generateTenxWorkspace' is enabled, Builder will use these settings when filling them in.
+	TenxWorkspaceOptions 		tenxOptions;
 
 	// Set this to true if you want Builder to force-rebuild your program.
 	// All binaries and intermediate files will get rebuilt.
@@ -350,14 +519,30 @@ struct BuilderOptions {
 	// If you don't use Visual Studio then ignore this.
 	bool						generateSolution;
 
-    // Do you want to generate a 10x Editor Workspace?
-	// If this is set to true, then a code build will NOT happen.
-	// If you don't use Visual Studio then ignore this.
+	// Are you using VS Code and do you want Builder to generate the VS Code tasks.json and launch.json files based off your BuildConfigs?
+	bool						generateVSCodeJSONFiles;
+
+	// Are you using VS Code and do you want Builder to generate the Zed tasks.json and debug.json files based off your BuildConfigs?
+	bool						generateZedJSONFiles;
+
+	// Are you using 10x and do you want Builder to generate a Workspace file based off your BuildConfigs?
 	bool						generateTenxWorkspace;
 
 	// Do you want to generate a compilation_commands.json for Clang tooling?
 	// If true, the file will be generated IF the build is successful.
 	bool						generateCompilationDatabase;
+
+	// For windows target platform: Do you want to link against the Windows dynamic runtime (DLL) instead of the static runtime (LIB)?
+	// This is because on Windows the C and C++ runtimes come in both static and dynamic versions, and you have to choose which one you want to compile with and link against.
+	// All this does is set the _DLL preprocessor definition for you, which changes linking behavior to use the dynamic runtime.
+	// On Linux this doesn't do anything.
+	bool						linkAgainstWindowsDynamicRuntime;
+
+	// Tell Builder to ignore the default libraries that the compiler would normally link against.
+	// This is useful if you don't want to link against the standard library.
+	// Note: On Linux this passes -nodefaultlibs to Clang, which does not exclude libgcc.
+	// If you need to exclude libgcc, pass -nostdlib via BuildConfig::additionalLinkerArguments.
+	bool 						noDefaultLibs;
 };
 
 struct CommandLineArgs {
@@ -365,6 +550,7 @@ struct CommandLineArgs {
 	char	**argv;
 };
 
+// Returns true if the exact argument 'arg' is present in the command line args, otherwise returns false.
 static bool HasCommandLineArg( CommandLineArgs *args, const char *arg ) {
 	for ( int argIndex = 0; argIndex < args->argc; argIndex++ ) {
 		if ( strcmp( args->argv[argIndex], arg ) == 0 ) {
@@ -373,6 +559,21 @@ static bool HasCommandLineArg( CommandLineArgs *args, const char *arg ) {
 	}
 
 	return false;
+}
+
+// Returns the value after '=' for args of the form "--key=value", or NULL if not found.
+static const char *GetCommandLineArgValue( CommandLineArgs *args, const char *arg ) {
+	size_t argLen = strlen( arg );
+
+	for ( int argIndex = 0; argIndex < args->argc; argIndex++ ) {
+		const char *currentArg = args->argv[argIndex];
+
+		if ( strncmp( currentArg, arg, argLen ) == 0 && currentArg[argLen] == '=' ) {
+			return currentArg + argLen + 1;
+		}
+	}
+
+	return NULL;
 }
 
 static void AddBuildConfigUnique( BuildConfig *config, std::vector<BuildConfig> &outConfigs );
@@ -443,18 +644,25 @@ static unsigned int BuilderGetConfigHash( BuildConfig *config, const unsigned in
 	hash = BuilderHashStringArray( hash, config->additionalIncludes );
 	hash = BuilderHashStringArray( hash, config->additionalLibPaths );
 	hash = BuilderHashStringArray( hash, config->additionalLibs );
+	hash = BuilderHashStringArray( hash, config->warningLevels );
 	hash = BuilderHashStringArray( hash, config->ignoreWarnings );
+	hash = BuilderHashStringArray( hash, config->additionalCompilerArguments );
+	hash = BuilderHashStringArray( hash, config->additionalLinkerArguments );
 
 	hash = BuilderHashCString( hash, config->binaryName.c_str(), config->binaryName.length() );
 	hash = BuilderHashCString( hash, config->binaryFolder.c_str(), config->binaryFolder.length() );
+	hash = BuilderHashCString( hash, config->intermediateFolder.c_str(), config->intermediateFolder.length() );
 	hash = BuilderHashCString( hash, config->name.c_str(), config->name.length() );
 
+	hash = BuilderHashSDBM( &config->languageVersion, hash, sizeof( LanguageVersion ) );
 	hash = BuilderHashSDBM( &config->binaryType, hash, sizeof( BinaryType ) );
 	hash = BuilderHashSDBM( &config->optimizationLevel, hash, sizeof( OptimizationLevel ) );
 
 	hash = BuilderHashSDBM( &config->removeSymbols, hash, sizeof( bool ) );
 	hash = BuilderHashSDBM( &config->removeFileExtension, hash, sizeof( bool ) );
 	hash = BuilderHashSDBM( &config->warningsAsErrors, hash, sizeof( bool ) );
+
+	// TODO(DM): do we hash OnPreBuild() and OnPostBuild() too?
 
 	return hash;
 }
@@ -483,3 +691,4 @@ static void AddBuildConfigUnique( BuildConfig *config, std::vector<BuildConfig> 
 #ifdef __linux__
 #pragma clang diagnostic pop
 #endif // __linux__
+

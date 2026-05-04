@@ -14,12 +14,13 @@
 
 
 enum compilerFlagBits_t {
-	COMPILER_DEFAULT	= bit( 0 ),
-	COMPILER_CLANG		= bit( 1 ),
-	COMPILER_GCC		= bit( 2 ),
-	COMPILER_MSVC		= bit( 3 ),
+	COMPILER_DEFAULT		= bit( 0 ),
+	COMPILER_CLANG			= bit( 1 ),
+	COMPILER_GCC			= bit( 2 ),
+	COMPILER_MSVC_SHORT		= bit( 3 ),
+	COMPILER_MSVC_FULL_PATH	= bit( 4 ),
 
-	COMPILER_ALL		= COMPILER_DEFAULT | COMPILER_CLANG | COMPILER_GCC | COMPILER_MSVC
+	COMPILER_ALL			= COMPILER_DEFAULT | COMPILER_CLANG | COMPILER_GCC | COMPILER_MSVC_SHORT | COMPILER_MSVC_FULL_PATH
 };
 typedef u32 compilerFlags_t;
 
@@ -39,10 +40,19 @@ struct buildTest_t {
 
 static const char *GetCompilerPath( const compilerFlagBits_t compiler ) {
 	switch ( compiler ) {
-		case COMPILER_DEFAULT:	return NULL;
-		case COMPILER_CLANG:	return	"../../clang/bin/clang";
-		case COMPILER_GCC:		return	"../../tools/gcc/bin/gcc";
-		case COMPILER_MSVC:		return	"cl";
+		case COMPILER_DEFAULT:			return NULL;
+		case COMPILER_CLANG:			return "../../clang/bin/clang";
+		case COMPILER_GCC:				return "../../tools/gcc/bin/gcc";
+		case COMPILER_MSVC_SHORT:		return "cl";
+#ifdef _WIN32
+		case COMPILER_MSVC_FULL_PATH: {
+			msvcInstall_t msvcInstall = {};
+			if ( Win_GetMSVCInstall( &msvcInstall ) ) {
+				return tprintf( "%s\\bin\\Hostx64\\x64\\cl", msvcInstall.rootFolder.data );
+			}
+			return NULL;
+		}
+#endif
 	}
 
 	TEMPER_CHECK_TRUE_M( false, "Bad compilerFlagBits_t passed\n" );
@@ -52,9 +62,10 @@ static const char *GetCompilerPath( const compilerFlagBits_t compiler ) {
 
 static const char *GetCompilerVersion( const compilerFlagBits_t compiler ) {
 	switch ( compiler ) {
-		case COMPILER_CLANG:	return	"20.1.5";
-		case COMPILER_GCC:		return	"15.1.0";
-		case COMPILER_MSVC:		return	"14.44.35207";
+		case COMPILER_CLANG:			return "20.1.5";
+		case COMPILER_GCC:				return "15.1.0";
+		case COMPILER_MSVC_SHORT:		return "14.44.35207";
+		case COMPILER_MSVC_FULL_PATH:	return "14.44.35207";
 	}
 
 	TEMPER_CHECK_TRUE_M( false, "Bad compilerFlagBits_t passed\n" );
@@ -103,6 +114,92 @@ static void GetAllGeneratedFiles( const FileInfo *fileInfo, void *data ) {
 	}
 }
 
+
+struct fileMatchesFilterTest_t {
+	const char	*filename;
+	const char	*filter;
+	bool8		expected;
+};
+
+TEMPER_TEST_PARAMETRIC( Test_FileMatchesFilter, TEMPER_FLAG_SHOULD_RUN, fileMatchesFilterTest_t test ) {
+	TEMPER_CHECK_TRUE_M( FileMatchesFilter( test.filename, test.filter ) == test.expected, "FileMatchesFilter( \"%s\", \"%s\" ): expected %s.\n", test.filename, test.filter, test.expected ? "true" : "false" );
+}
+
+TEMPER_INVOKE_PARAMETRIC_TEST( Test_FileMatchesFilter, { "main.cpp",          "main.cpp",     true  } );
+TEMPER_INVOKE_PARAMETRIC_TEST( Test_FileMatchesFilter, { "src/main.cpp",      "src/main.cpp", true  } );
+TEMPER_INVOKE_PARAMETRIC_TEST( Test_FileMatchesFilter, { "main.h",            "main.cpp",     false } );
+TEMPER_INVOKE_PARAMETRIC_TEST( Test_FileMatchesFilter, { "main.cpp",          "main.cpp.bak", false } );
+TEMPER_INVOKE_PARAMETRIC_TEST( Test_FileMatchesFilter, { "main.cpp",          "*.cpp",        true  } );
+TEMPER_INVOKE_PARAMETRIC_TEST( Test_FileMatchesFilter, { "main.h",            "*.cpp",        false } );
+TEMPER_INVOKE_PARAMETRIC_TEST( Test_FileMatchesFilter, { "src/main.cpp",      "src/*.cpp",    true  } );
+TEMPER_INVOKE_PARAMETRIC_TEST( Test_FileMatchesFilter, { "other/main.cpp",    "src/*.cpp",    false } );
+TEMPER_INVOKE_PARAMETRIC_TEST( Test_FileMatchesFilter, { "src/sub/other.cpp", "src/*.cpp",    false } );
+TEMPER_INVOKE_PARAMETRIC_TEST( Test_FileMatchesFilter, { "src/sub/other.cpp", "src/**/*.cpp", true  } );
+TEMPER_INVOKE_PARAMETRIC_TEST( Test_FileMatchesFilter, { "src/a/b/other.cpp", "src/**/*.cpp", true  } );
+TEMPER_INVOKE_PARAMETRIC_TEST( Test_FileMatchesFilter, { "src/main.cpp",      "src/**/*.cpp", true  } );
+
+
+static bool SourceFileListContains( const std::vector<std::string> &files, const char *filename ) {
+	For ( u64, fileIndex, 0, files.size() ) {
+		if ( string_ends_with( files[fileIndex].c_str(), filename ) ) {
+			return true;
+		}
+	}
+	return false;
+}
+
+struct sourceFilesPatternTest_t {
+	const char					*basePath;
+	const char					*pattern;
+	std::vector<const char *>	expectedPresent;
+	std::vector<const char *>	expectedAbsent;
+	u64							expectedCount;
+};
+
+TEMPER_TEST_PARAMETRIC( Test_GetSourceFilesMatchingPattern, TEMPER_FLAG_SHOULD_RUN, sourceFilesPatternTest_t test ) {
+	std::vector<std::string> files = GetSourceFilesMatchingPattern( test.basePath, test.pattern );
+
+	TEMPER_CHECK_TRUE_M( files.size() == test.expectedCount, "Expected %zu files, got %zu.\n", test.expectedCount, files.size() );
+
+	For ( u64, fileIndex, 0, test.expectedPresent.size() ) {
+		TEMPER_CHECK_TRUE_M( SourceFileListContains( files, test.expectedPresent[fileIndex] ), "Expected \"%s\" in results.\n", test.expectedPresent[fileIndex] );
+	}
+
+	For ( u64, fileIndex, 0, test.expectedAbsent.size() ) {
+		TEMPER_CHECK_FALSE_M( SourceFileListContains( files, test.expectedAbsent[fileIndex] ), "Did not expect \"%s\" in results.\n", test.expectedAbsent[fileIndex] );
+	}
+}
+
+TEMPER_INVOKE_PARAMETRIC_TEST( Test_GetSourceFilesMatchingPattern, {
+	.basePath        = "test_file_globbing/src",
+	.pattern         = "test_file_globbing/src/*.cpp",
+	.expectedPresent = { "main.cpp", "helper.cpp" },
+	.expectedAbsent  = { "main.h", "other.cpp" },
+	.expectedCount   = 2,
+} );
+
+TEMPER_INVOKE_PARAMETRIC_TEST( Test_GetSourceFilesMatchingPattern, {
+	.basePath        = "test_file_globbing/src",
+	.pattern         = "test_file_globbing/src/**/*.cpp",
+	.expectedPresent = { "main.cpp", "helper.cpp", "other.cpp" },
+	.expectedAbsent  = { "main.h" },
+	.expectedCount   = 3,
+} );
+
+TEMPER_INVOKE_PARAMETRIC_TEST( Test_GetSourceFilesMatchingPattern, {
+	.basePath        = "test_file_globbing/src",
+	.pattern         = "test_file_globbing/src/main.cpp",
+	.expectedPresent = { "main.cpp" },
+	.expectedCount   = 1,
+} );
+
+TEMPER_INVOKE_PARAMETRIC_TEST( Test_GetSourceFilesMatchingPattern, {
+	.basePath      = "test_file_globbing/src",
+	.pattern       = "test_file_globbing/src/*.xyz",
+	.expectedCount = 0,
+} );
+
+
 TEMPER_TEST_PARAMETRIC( TestBuild, TEMPER_FLAG_SHOULD_RUN, buildTest_t test ) {
 	TEMPER_CHECK_TRUE_M( test.rootDir, "A test MUST live in its own folder, you need to tell me what the \"root\" folder for this test is.\n" );
 
@@ -144,7 +241,7 @@ TEMPER_TEST_PARAMETRIC( TestBuild, TEMPER_FLAG_SHOULD_RUN, buildTest_t test ) {
 		compilerFlagBits_t compiler = cast( compilerFlagBits_t, bit( compilerIndex ) );
 
 #ifdef __linux__
-		if ( compiler == COMPILER_MSVC ) {
+		if ( compiler == COMPILER_MSVC_SHORT || compiler == COMPILER_MSVC_FULL_PATH ) {
 			continue;
 		}
 #endif
@@ -170,9 +267,16 @@ TEMPER_TEST_PARAMETRIC( TestBuild, TEMPER_FLAG_SHOULD_RUN, buildTest_t test ) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wswitch"
 			switch ( compiler ) {
-				case COMPILER_CLANG:	args.add( "--clang" );	break;
-				case COMPILER_GCC:		args.add( "--gcc" );	break;
-				case COMPILER_MSVC:		args.add( "--msvc" );	break;
+				case COMPILER_CLANG:			args.add( "--clang" );	break;
+				case COMPILER_GCC:				args.add( "--gcc" );	break;
+				case COMPILER_MSVC_SHORT:		args.add( "--msvc" );	break;
+#ifdef _WIN32
+				case COMPILER_MSVC_FULL_PATH: {
+					msvcInstall_t msvcInstall = {};
+					TEMPER_CHECK_TRUE_M( Win_GetMSVCInstall( &msvcInstall ), "Failed to find MSVC install for full-path compiler test.\n" );
+					args.add( tprintf( "--msvc-full-path=%s\\bin\\Hostx64\\x64\\cl", msvcInstall.rootFolder.data ) );
+				} break;
+#endif
 			}
 #pragma clang diagnostic pop
 
@@ -192,6 +296,7 @@ TEMPER_TEST_PARAMETRIC( TestBuild, TEMPER_FLAG_SHOULD_RUN, buildTest_t test ) {
 		const char *dotBuilderFolder = ".builder";
 
 		generatedFiles.files.reset();
+		generatedFiles.folders.reset();
 
 		TEMPER_CHECK_TRUE( file_get_all_files_in_folder( dotBuilderFolder, true, true, GetAllGeneratedFiles, &generatedFiles ) );
 		if ( test.binaryFolder ) {
@@ -249,6 +354,18 @@ TEMPER_TEST_PARAMETRIC( TestBuild, TEMPER_FLAG_SHOULD_RUN, buildTest_t test ) {
 TEMPER_INVOKE_PARAMETRIC_TEST( TestBuild, {
 	.rootDir			= "test_basic",
 	.buildSourceFile	= "test_basic.cpp",
+	.compilers			= COMPILER_DEFAULT,
+} );
+
+TEMPER_INVOKE_PARAMETRIC_TEST( TestBuild, {
+	.rootDir			= "test_basic_stdlib",
+	.buildSourceFile	= "test_basic_stdlib.cpp",
+	.compilers			= COMPILER_DEFAULT,
+} );
+
+TEMPER_INVOKE_PARAMETRIC_TEST( TestBuild, {
+	.rootDir			= "test_dynamic_runtime_linking",
+	.buildSourceFile	= "test_dynamic_runtime_linking.cpp",
 	.compilers			= COMPILER_DEFAULT,
 } );
 
@@ -394,6 +511,201 @@ TEMPER_TEST( GenerateVisualStudioSolution, TEMPER_FLAG_SHOULD_RUN ) {
 #endif // _WIN32
 }
 
+TEMPER_TEST( GenerateVSCodeJSONFiles, TEMPER_FLAG_SHOULD_RUN ) {
+	const char *buildFile				= "test_generate_vscode_json_files/generate_vscode_json.cpp";
+	const char *dotBuilderFolder		= "test_generate_vscode_json_files/.builder";
+	const char *vsCodeFolder			= "test_generate_vscode_json_files/.vscode";
+	const char *cppPropertiesJSONPath	= "test_generate_vscode_json_files/.vscode/c_cpp_properties.json";
+	const char *tasksJSONPath			= "test_generate_vscode_json_files/.vscode/tasks.json";
+	const char *launchJSONPath			= "test_generate_vscode_json_files/.vscode/launch.json";
+
+	// generate the VS Code JSON files
+	{
+		Array<const char *> args;
+		args.add( buildFile );
+
+		s32 exitCode = BuilderMain( 0, trunc_cast( int, args.count ), args.data );
+		TEMPER_CHECK_TRUE_M( exitCode == 0, "BuilderMain() returned %d.\n", exitCode );
+	}
+
+	// c_cpp_properties.json
+	{
+		TEMPER_CHECK_TRUE_M( file_exists( cppPropertiesJSONPath ), "c_cpp_properties.json was not generated at \"%s\".\n", cppPropertiesJSONPath );
+
+		char *content = NULL;
+		u64 contentLength = 0;
+		TEMPER_CHECK_TRUE_M( file_read_entire( cppPropertiesJSONPath, &content, &contentLength ), "Failed to read c_cpp_properties.json.\n" );
+		defer( file_free_buffer( &content ) );
+
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"configurations\"" ),         "c_cpp_properties.json is missing \"configurations\" array.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"version\": 4" ),             "c_cpp_properties.json is missing \"version\": 4.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"name\": \"config\"" ),       "c_cpp_properties.json is missing config name.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"includePath\"" ),            "c_cpp_properties.json is missing \"includePath\".\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "${workspaceFolder}/include" ), "c_cpp_properties.json is missing include path.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"defines\"" ),                "c_cpp_properties.json is missing \"defines\".\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "MY_DEFINE=1" ),                "c_cpp_properties.json is missing define.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"cppStandard\": \"c++17\"" ), "c_cpp_properties.json is missing cppStandard.\n" );
+#if defined( _WIN32 )
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"windows-clang-x64\"" ),      "c_cpp_properties.json is missing intelliSenseMode.\n" );
+#else
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"linux-clang-x64\"" ),        "c_cpp_properties.json is missing intelliSenseMode.\n" );
+#endif
+	}
+
+	// tasks.json
+	{
+		TEMPER_CHECK_TRUE_M( file_exists( tasksJSONPath ), "tasks.json was not generated at \"%s\".\n", tasksJSONPath );
+
+		char *content = NULL;
+		u64 contentLength = 0;
+		TEMPER_CHECK_TRUE_M( file_read_entire( tasksJSONPath, &content, &contentLength ), "Failed to read tasks.json.\n" );
+		defer( file_free_buffer( &content ) );
+
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"version\"" ),              "tasks.json is missing \"version\".\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"tasks\"" ),                "tasks.json is missing \"tasks\" array.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"Build config\"" ),         "tasks.json is missing \"Build config\" task.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"--config=config\"" ),      "tasks.json is missing --config=config arg.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"--release\"" ),            "tasks.json is missing --release arg for second task.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "generate_vscode_json.cpp" ), "tasks.json is missing the build file arg.\n" );
+	}
+
+	// launch.json
+	{
+		TEMPER_CHECK_TRUE_M( file_exists( launchJSONPath ), "launch.json was not generated at \"%s\".\n", launchJSONPath );
+
+		char *content = NULL;
+		u64 contentLength = 0;
+		TEMPER_CHECK_TRUE_M( file_read_entire( launchJSONPath, &content, &contentLength ), "Failed to read launch.json.\n" );
+		defer( file_free_buffer( &content ) );
+
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"version\"" ),                     "launch.json is missing \"version\".\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"configurations\"" ),              "launch.json is missing \"configurations\" array.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "bin/debug/test_app" ),              "launch.json is missing debug binary path.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "bin/release/test_app" ),            "launch.json is missing release binary path.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"request\": \"launch\"" ),         "launch.json is missing \"request\": \"launch\".\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"cwd\": \"${workspaceFolder}\"" ), "launch.json is missing default cwd.\n" );
+#ifdef _WIN32
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"type\": \"cppvsdbg\"" ),          "launch.json is missing \"type\": \"cppvsdbg\" on Windows.\n" );
+#else
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"type\": \"cppdbg\"" ),            "launch.json is missing \"type\": \"cppdbg\" on Linux.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"MIMode\": \"gdb\"" ),             "launch.json is missing \"MIMode\": \"gdb\" on Linux.\n" );
+#endif
+	}
+
+	// cleanup
+	{
+		buildTestGeneratedFiles_t generatedFiles = {};
+		generatedFiles.fileExtensionsToDelete.add( GetFileExtensionFromBinaryType( BINARY_TYPE_DYNAMIC_LIBRARY ) );
+		generatedFiles.fileExtensionsToDelete.add( ".d" );
+		generatedFiles.fileExtensionsToDelete.add( ".o" );
+		generatedFiles.fileExtensionsToDelete.add( ".include_dependencies" );
+		generatedFiles.fileExtensionsToDelete.add( ".lib" );
+		generatedFiles.fileExtensionsToDelete.add( ".exp" );
+		generatedFiles.fileExtensionsToDelete.add( ".pdb" );
+		generatedFiles.fileExtensionsToDelete.add( ".ilk" );
+		generatedFiles.fileExtensionsToDelete.add( ".json" );
+
+		TEMPER_CHECK_TRUE( file_get_all_files_in_folder( dotBuilderFolder, true, true, GetAllGeneratedFiles, &generatedFiles ) );
+		TEMPER_CHECK_TRUE( file_get_all_files_in_folder( vsCodeFolder, true, true, GetAllGeneratedFiles, &generatedFiles ) );
+
+		For ( u32, fileIndex, 0, generatedFiles.files.count ) {
+			TEMPER_CHECK_TRUE_M( file_delete( generatedFiles.files[fileIndex] ), "Failed to delete \"%s\".\n", generatedFiles.files[fileIndex] );
+		}
+
+		TEMPER_CHECK_TRUE_M( folder_delete( dotBuilderFolder ), "Failed to delete \"%s\".\n", dotBuilderFolder );
+		TEMPER_CHECK_TRUE_M( folder_delete( vsCodeFolder ), "Failed to delete .vscode folder.\n" );
+	}
+}
+
+TEMPER_TEST( GenerateZedJSONFiles, TEMPER_FLAG_SHOULD_RUN ) {
+	const char *dotBuilderFolder = "test_generate_zed_json_files/.builder";
+	const char *tasksJSONPath    = "test_generate_zed_json_files/.zed/tasks.json";
+	const char *debugJSONPath    = "test_generate_zed_json_files/.zed/debug.json";
+
+	// generate the Zed JSON files
+	{
+		Array<const char *> args;
+		args.add( "test_generate_zed_json_files/generate_zed_json.cpp" );
+
+		s32 exitCode = BuilderMain( 0, trunc_cast( int, args.count ), args.data );
+		TEMPER_CHECK_TRUE_M( exitCode == 0, "BuilderMain() returned %d.\n", exitCode );
+	}
+
+	// tasks.json
+	{
+		TEMPER_CHECK_TRUE_M( file_exists( tasksJSONPath ), "tasks.json was not generated at \"%s\".\n", tasksJSONPath );
+
+		char *content = NULL;
+		u64 contentLength = 0;
+		TEMPER_CHECK_TRUE_M( file_read_entire( tasksJSONPath, &content, &contentLength ), "Failed to read tasks.json.\n" );
+		defer( file_free_buffer( &content ) );
+
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"label\""             ), "tasks.json is missing \"label\".\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"Build config\""      ), "tasks.json is missing \"Build config\" task.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"command\""           ), "tasks.json is missing \"command\".\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"args\""              ), "tasks.json is missing \"args\" array.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"--config=config\""   ), "tasks.json is missing --config=config arg.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"--release\""         ), "tasks.json is missing --release arg for second task.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "generate_zed_json.cpp" ), "tasks.json is missing the build file arg.\n" );
+	}
+
+	// debug.json
+	{
+		TEMPER_CHECK_TRUE_M( file_exists( debugJSONPath ), "debug.json was not generated at \"%s\".\n", debugJSONPath );
+
+		char *content = NULL;
+		u64 contentLength = 0;
+		TEMPER_CHECK_TRUE_M( file_read_entire( debugJSONPath, &content, &contentLength ), "Failed to read debug.json.\n" );
+		defer( file_free_buffer( &content ) );
+
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"label\""                ), "debug.json is missing \"label\".\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"config (debug)\""       ), "debug.json is missing config (debug) binary label.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"config (release)\""     ), "debug.json is missing config (release) binary label.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"program\""              ), "debug.json is missing \"program\".\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "bin/debug/test_app"       ), "debug.json is missing debug binary path.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "bin/release/test_app"     ), "debug.json is missing release binary path.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"${ZED_WORKTREE_ROOT}\"" ), "debug.json is missing default cwd.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"adapter\""              ), "debug.json is missing \"adapter\".\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"CodeLLDB\""             ), "debug.json is missing \"CodeLLDB\" adapter.\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"request\""              ), "debug.json is missing \"request\".\n" );
+		TEMPER_CHECK_TRUE_M( string_contains( content, "\"launch\""               ), "debug.json is missing \"launch\" request.\n" );
+	}
+
+	// cleanup
+	{
+		// delete all files in .builder before removing the folder
+		// (rmdir requires an empty directory)
+		{
+			buildTestGeneratedFiles_t generatedFiles = {};
+			generatedFiles.fileExtensionsToDelete.add( GetFileExtensionFromBinaryType( BINARY_TYPE_DYNAMIC_LIBRARY ) );
+			generatedFiles.fileExtensionsToDelete.add( ".d" );
+			generatedFiles.fileExtensionsToDelete.add( ".o" );
+			generatedFiles.fileExtensionsToDelete.add( ".include_dependencies" );
+			generatedFiles.fileExtensionsToDelete.add( ".lib" );
+			generatedFiles.fileExtensionsToDelete.add( ".exp" );
+			generatedFiles.fileExtensionsToDelete.add( ".pdb" );
+			generatedFiles.fileExtensionsToDelete.add( ".ilk" );
+
+			TEMPER_CHECK_TRUE( file_get_all_files_in_folder( dotBuilderFolder, true, true, GetAllGeneratedFiles, &generatedFiles ) );
+
+			For ( u32, fileIndex, 0, generatedFiles.files.count ) {
+				TEMPER_CHECK_TRUE_M( file_delete( generatedFiles.files[fileIndex] ), "Failed to delete \"%s\".\n", generatedFiles.files[fileIndex] );
+			}
+
+			TEMPER_CHECK_TRUE_M( folder_delete( dotBuilderFolder ), "Failed to delete \"%s\".\n", dotBuilderFolder );
+		}
+
+		// delete .zed contents then the folder
+		if ( file_exists( tasksJSONPath ) ) {
+			TEMPER_CHECK_TRUE_M( file_delete( tasksJSONPath ), "Failed to delete tasks.json.\n" );
+		}
+		if ( file_exists( debugJSONPath ) ) {
+			TEMPER_CHECK_TRUE_M( file_delete( debugJSONPath ), "Failed to delete debug.json.\n" );
+		}
+		TEMPER_CHECK_TRUE_M( folder_delete( "test_generate_zed_json_files/.zed" ), "Failed to delete .zed folder.\n" );
+	}
+}
+
 // Validates the generated compile_commands.json by feeding it to clang-tidy.
 // If clang-tidy can successfully load the compilation database, it proves
 // the JSON is correctly formatted according to the specification.
@@ -451,6 +763,7 @@ TEMPER_TEST( ValidateCompilationDatabase, TEMPER_FLAG_SHOULD_RUN ) {
 	TEMPER_CHECK_TRUE_M( isValid, "clang-tidy failed to load compile_commands.json - the file may be malformed\n" );
 }
 
+
 int main( int argc, char **argv ) {
 	core_init( MEM_KILOBYTES( 64 ) );
 	defer( core_shutdown() );
@@ -458,6 +771,10 @@ int main( int argc, char **argv ) {
 	TEMPER_RUN( argc, argv );
 
 	int exitCode = TEMPER_GET_EXIT_CODE();
+
+	if ( exitCode != 0 ) {
+		debug_break();
+	}
 
 	return exitCode;
 }

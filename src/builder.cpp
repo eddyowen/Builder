@@ -66,8 +66,8 @@ SOFTWARE.
 
 enum {
 	BUILDER_VERSION_MAJOR	= 0,
-	BUILDER_VERSION_MINOR	= 11,
-	BUILDER_VERSION_PATCH	= 3,
+	BUILDER_VERSION_MINOR	= 12,
+	BUILDER_VERSION_PATCH	= 0,
 };
 
 enum buildResult_t {
@@ -90,7 +90,7 @@ bool8 g_verbose = false;
 u64 GetLastFileWriteTime( const char *filename ) {
 	u64 lastWriteTime = 0;
 	if ( !file_get_last_write_time( filename, &lastWriteTime ) ) {
-		assert( false );
+		return U64_MAX;
 	}
 
 	return lastWriteTime;
@@ -327,10 +327,10 @@ s32 RunProc( Array<const char *> *args, Array<const char *> *environmentVariable
 
 	u64 bytesRead = 0;
 	char buffer[1024] = {};
-	while ( ( bytesRead = process_read_stdout( process, buffer, 1024 ) ) ) {
+	while ( ( bytesRead = process_read_stdout( process, buffer, count_of( buffer ) - 1 ) ) ) {
 		buffer[bytesRead] = 0;
 
-		string_builder_appendf( &sb, buffer );
+		string_builder_appendf( &sb, "%s", buffer );
 
 		if ( procFlags & PROC_FLAG_SHOW_STDOUT ) {
 			printf( "%s", buffer );
@@ -345,6 +345,21 @@ s32 RunProc( Array<const char *> *args, Array<const char *> *environmentVariable
 
 	return exitCode;
 }
+
+bool8 WriteStringBuilderToFile( StringBuilder *stringBuilder, const char *filename ) {
+	const char *msg = string_builder_to_string( stringBuilder );
+	const u64 msgLength = strlen( msg );
+	bool8 written = file_write_entire( filename, msg, msgLength );
+
+	if ( !written ) {
+		errorCode_t errorCode = get_last_error_code();
+		error( "Failed to write \"%s\": " ERROR_CODE_FORMAT ".\n", filename, errorCode );
+
+		return false;
+	}
+
+	return true;
+};
 
 static s32 ShowUsage( const s32 exitCode ) {
 	printf(
@@ -387,7 +402,7 @@ static s32 ShowUsage( const s32 exitCode ) {
 	return exitCode;
 }
 
-static buildResult_t BuildBinary( buildContext_t *context, BuildConfig *config, compilerBackend_t *compilerBackend, bool generateCompilationDatabase ) {
+static buildResult_t BuildBinary( buildContext_t *context, BuildConfig *config, compilerBackend_t *compilerBackend, const BuilderOptions *options ) {
 	// create binary folder
 	if ( !folder_create_if_it_doesnt_exist( config->binaryFolder.c_str() ) ) {
 		errorCode_t errorCode = get_last_error_code();
@@ -468,6 +483,7 @@ static buildResult_t BuildBinary( buildContext_t *context, BuildConfig *config, 
 		printf( "Compiling:\n" );
 	}
 
+	bool8 generateCompilationDatabase = options && options->generateCompilationDatabase;
 	if ( generateCompilationDatabase ) {
 		context->compilationDatabase.reserve( config->sourceFiles.size() );
 	}
@@ -535,7 +551,7 @@ static buildResult_t BuildBinary( buildContext_t *context, BuildConfig *config, 
 
 		printf( "\nLinking:\n" );
 
-		if ( !compilerBackend->LinkIntermediateFiles( compilerBackend, intermediateFiles, config ) ) {
+		if ( !compilerBackend->LinkIntermediateFiles( compilerBackend, intermediateFiles, config, options ) ) {
 			error( "Linking failed.\n" );
 			return BUILD_RESULT_FAILED;
 		}
@@ -595,7 +611,7 @@ bool8 NukeFolder( const char *folder, const bool8 deleteRootFolder, const bool8 
 
 	if ( deleteRootFolder ) {
 		if ( !folder_delete( folder ) ) {
-			error( "Failed to nuke root folder \"%s\" after deleting all the files and folders inside it.  You'll need to do this manually.  Sorry.\n" );
+			error( "Failed to nuke root folder \"%s\" after deleting all the files and folders inside it.  You'll need to do this manually.  Sorry.\n", folder );
 			result = false;
 		}
 	}
@@ -605,14 +621,14 @@ bool8 NukeFolder( const char *folder, const bool8 deleteRootFolder, const bool8 
 
 const char *GetNextSlashInPath( const char *path ) {
 	const char *nextSlash = NULL;
-	const char *nextBackSlash = strrchr( path, '\\' );
-	const char *nextForwardSlash = strrchr( path, '/' );
+	const char *nextBackSlash = strchr( path, '\\' );
+	const char *nextForwardSlash = strchr( path, '/' );
 
 	if ( !nextBackSlash && !nextForwardSlash ) {
 		return NULL;
 	}
 
-	if ( cast( u64, nextBackSlash ) > cast( u64, nextForwardSlash ) ) {
+	if ( cast( u64, nextBackSlash ) < cast( u64, nextForwardSlash ) ) {
 		nextSlash = nextBackSlash;
 	} else {
 		nextSlash = nextForwardSlash;
@@ -621,27 +637,55 @@ const char *GetNextSlashInPath( const char *path ) {
 	return nextSlash;
 }
 
-static bool8 FileMatchesFilter( const char *filename, const char *filter ) {
+bool8 FileMatchesFilter( const char *filename, const char *filter ) {
 	const char *filenameCopy = filename;
 	const char *filterCopy = filter;
 
-	const char *filenameBackup = NULL;
-	const char *filterBackup = NULL;
+	// two separate backup slots:
+	//	single-star - cannot cross '/', falls through to double-star on failure
+	//	double-star - may cross '/', used as the outer fallback
+	const char *filenameBackupSingle = NULL;
+	const char *filterBackupSingle   = NULL;
+	const char *filenameBackupDouble = NULL;
+	const char *filterBackupDouble   = NULL;
 
 	while ( *filenameCopy ) {
 		if ( *filterCopy == '*' ) {
-			filenameBackup = filenameCopy;
-			filterBackup = ++filterCopy;
+			if ( *( filterCopy + 1 ) == '*' ) {
+				// "**/" - try zero path components first (skip "*/"), then fall through to greedy
+				if ( *( filterCopy + 2 ) == '/' ) {
+					if ( FileMatchesFilter( filenameCopy, filterCopy + 3 ) ) {
+						return true;
+					}
+				}
+
+				// "**" greedy backup: crosses path separators
+				filenameBackupDouble = filenameCopy;
+				filterBackupDouble = ( filterCopy += 2 );
+				filenameBackupSingle = NULL;
+				filterBackupSingle = NULL;
+			} else {
+				// Single "*" greedy backup
+				// does not cross path separators
+				filenameBackupSingle = filenameCopy;
+				filterBackupSingle = ++filterCopy;
+			}
 		} else if ( *filenameCopy == *filterCopy ) {
-			filenameCopy += 1;
-			filterCopy += 1;
+			filenameCopy++;
+			filterCopy++;
 		} else {
-			if ( !filterBackup ) {
+			// mismatch - try single-star expansion first (but stop at '/'), then double-star
+			if ( filenameBackupSingle && *filenameBackupSingle != '/' ) {
+				filenameCopy = ++filenameBackupSingle;
+				filterCopy = filterBackupSingle;
+			} else if ( filenameBackupDouble ) {
+				filenameBackupSingle = NULL;
+				filterBackupSingle = NULL;
+				filenameCopy = ++filenameBackupDouble;
+				filterCopy = filterBackupDouble;
+			} else {
 				return false;
 			}
-
-			filenameCopy = ++filenameBackup;
-			filterCopy = filterBackup;
 		}
 	}
 
@@ -656,42 +700,84 @@ struct sourceFileFindVisitorData_t {
 static void SourceFileVisitor( const FileInfo *fileInfo, void *userData ) {
 	sourceFileFindVisitorData_t *visitorData2 = cast( sourceFileFindVisitorData_t *, userData );
 
-	const char *checkAgainst = NULL;
+	// const char *filename = NULL;
+	// if ( string_contains( visitorData2->searchFilter, "/" ) || string_contains( visitorData2->searchFilter, "\\" ) ) {
+	// 	filename = fileInfo->full_filename;
+	// } else {
+	// 	filename = fileInfo->filename;
+	// }
 
-	if ( string_contains( visitorData2->searchFilter, "/" ) || string_contains( visitorData2->searchFilter, "\\" ) ) {
-		checkAgainst = fileInfo->full_filename;
-	} else {
-		checkAgainst = fileInfo->filename;
-	}
-
-	if ( FileMatchesFilter( checkAgainst, visitorData2->searchFilter ) ) {
+	if ( FileMatchesFilter( fileInfo->full_filename/*filename*/, visitorData2->searchFilter ) ) {
+		LogVerbose( " - Found \"%s\"\n", fileInfo->full_filename );
 		visitorData2->sourceFiles.push_back( fileInfo->full_filename );
 	}
 }
 
-static std::vector<std::string> BuildConfig_GetAllSourceFiles( const buildContext_t *context, const BuildConfig *config ) {
+std::vector<std::string> GetSourceFilesMatchingPattern( const char *basePath, const char *pattern ) {
 	sourceFileFindVisitorData_t visitorData = {};
+	visitorData.searchFilter = pattern;
+
+	bool8 recursive = string_contains( pattern, "**" );
+
+	if ( !file_get_all_files_in_folder( basePath, recursive, false, SourceFileVisitor, &visitorData ) ) {
+		fatal_error( "Failed to get source file(s) \"%s\".  This should never happen.\n", pattern );
+	}
+
+	return visitorData.sourceFiles;
+}
+
+static std::vector<std::string> BuildConfig_GetAllSourceFiles( const buildContext_t *context, const BuildConfig *config ) {
+	std::vector<std::string> allSourceFiles;
 
 	For ( u64, sourceFileIndex, 0, config->sourceFiles.size() ) {
 		const char *sourceFile = config->sourceFiles[sourceFileIndex].c_str();
 
-		bool8 recursive = string_contains( sourceFile, "**" ) || string_contains( sourceFile, "/" );
+		// only glob if the filename has a wildcard
+		if ( string_contains( sourceFile, "*" ) ) {
+			LogVerbose( "About to glob all source files found under user-specified pattern \"%s\" to the list of source files to build with:\n" );
 
-		// TODO(DM): 02/10/2025: needing this is (probably) a hack
-		// re-evaluate this
-		bool8 inputFileIsSameAsSourceFile = string_equals( sourceFile, context->inputFile );
-		if ( inputFileIsSameAsSourceFile ) {
-			visitorData.searchFilter = context->inputFile;
+			// TODO(DM): 02/10/2025: needing this is (probably) a hack
+			// re-evaluate this
+			const char *basePath = NULL;//context->inputFilePath.data;
+			const char *pattern = NULL;
+			bool8 inputFileIsSameAsSourceFile = string_equals( sourceFile, context->inputFile );
+			if ( inputFileIsSameAsSourceFile ) {
+				pattern = context->inputFile;
+				basePath = context->inputFilePath.data;
+			} else {
+				pattern = tprintf( "%s%c%s", context->inputFilePath.data, '/', sourceFile );
+
+				// basePath must be the directory before the first wildcard
+				const char *firstStar = strchr( pattern, '*' );
+				u64 baseLen = cast( u64, firstStar ) - cast( u64, pattern );
+				while ( baseLen > 0 && pattern[baseLen - 1] != '/' && pattern[baseLen - 1] != '\\' ) {
+					baseLen--;
+				}
+
+				// remove trailing slash if found
+				if ( baseLen > 0 ) {
+					baseLen--;
+				}
+
+				char *trimmedBasePath = cast( char *, mem_temp_alloc( ( baseLen + 1 ) * sizeof( char ) ) );
+				memcpy( trimmedBasePath, pattern, baseLen );
+				trimmedBasePath[baseLen] = '\0';
+
+				basePath = trimmedBasePath;
+			}
+
+			std::vector<std::string> matches = GetSourceFilesMatchingPattern( basePath, pattern );
+
+			allSourceFiles.insert( allSourceFiles.end(), matches.begin(), matches.end() );
 		} else {
-			visitorData.searchFilter = tprintf( "%s%c%s", context->inputFilePath.data, '/', sourceFile );
-		}
+			// otherwise its a single file, so we can just get it
+			LogVerbose( "Adding source file \"%s\" to the list of source files to build with (no glob).\n" );
 
-		if ( !file_get_all_files_in_folder( context->inputFilePath.data, recursive, false, SourceFileVisitor, &visitorData ) ) {
-			fatal_error( "Failed to get source file(s) \"%s\".  This should never happen.\n", sourceFile );
+			allSourceFiles.push_back( tprintf( "%s%c%s", context->inputFilePath.data, '/', sourceFile ) );
 		}
 	}
 
-	return visitorData.sourceFiles;
+	return allSourceFiles;
 }
 
 static void AddBuildConfigAndDependenciesUnique( buildContext_t *context, const BuildConfig *config, std::vector<BuildConfig> &outConfigs ) {
@@ -1079,7 +1165,9 @@ int BuilderMain( const int firstArg, int argc, const char * const * argv ) {
 	float64 setBuilderOptionsTimeMS = -1.0;
 	float64 compilerBackendInitTimeMS = -1.0;
 	float64 visualStudioGenerationTimeMS = -1.0;
-	float64 TenXEditorGenerationTimeMS = -1.0;
+	float64 vsCodeJSONGenerationTimeMS = -1.0;
+	float64 zedJSONGenerationTimeMS = -1.0;
+	float64 tenxWorkspaceGenerationTimeMS = -1.0;
 
 	core_init( MEM_MEGABYTES( 128 ) );	// TODO(DM): 26/03/2025: can we just use defaults for this now?
 	defer( core_shutdown() );
@@ -1274,6 +1362,7 @@ int BuilderMain( const int firstArg, int argc, const char * const * argv ) {
 #else
 				"NDEBUG",
 #endif
+				"_DLL",
 			},
 			.additionalIncludes = {
 				// add the folder that builder lives in as an additional include path otherwise people have no real way of being able to include it
@@ -1282,11 +1371,6 @@ int BuilderMain( const int firstArg, int argc, const char * const * argv ) {
 			.additionalLibs = {
 #if defined( _WIN64 )
 				"user32",
-#if defined( _DEBUG )
-				"msvcprtd",
-#else
-				"msvcprt",
-#endif
 #endif
 			},
 			.ignoreWarnings = {
@@ -1313,7 +1397,9 @@ int BuilderMain( const int firstArg, int argc, const char * const * argv ) {
 
 		userConfigFullBinaryName = BuildConfig_GetFullBinaryName( &userConfigBuildConfig );
 
-		userConfigBuildResult = BuildBinary( &context, &userConfigBuildConfig, &compilerBackend, false );
+		// Within build binary and check against the options checks for its existance, defaulting to false which is what the user config build wants for each option
+		// So just pass through nullptr when calling BuildBinary for the options build and it will work as expected
+		userConfigBuildResult = BuildBinary( &context, &userConfigBuildConfig, &compilerBackend, nullptr );
 
 		switch ( userConfigBuildResult ) {
 			case BUILD_RESULT_SUCCESS: {
@@ -1362,7 +1448,7 @@ int BuilderMain( const int firstArg, int argc, const char * const * argv ) {
 
 			setBuilderOptionsFunc( &options, &args );
 
-			printf( "%s override function Finished.\n\n", SET_BUILDER_OPTIONS_FUNC_NAME );
+			printf( "%s override function finished.\n\n", SET_BUILDER_OPTIONS_FUNC_NAME );
 		} else {
 			LogVerbose( "No %s override function was found.\n\n", SET_BUILDER_OPTIONS_FUNC_NAME );
 		}
@@ -1417,6 +1503,24 @@ int BuilderMain( const int firstArg, int argc, const char * const * argv ) {
 		printf( "Done.\n\n" );
 
 		visualStudioGenerationTimeMS = time_ms() - start;
+	} else if ( options.generateVSCodeJSONFiles ) {
+		float64 start = time_ms();
+
+		if ( !GenerateVSCodeJSONFiles( &context, &options ) ) {
+			error( "Failed to generate VS Code JSON files.\n" );
+			QUIT_ERROR();
+		}
+
+		vsCodeJSONGenerationTimeMS = time_ms() - start;
+	} else if ( options.generateZedJSONFiles ) {
+		float64 start = time_ms();
+
+		if ( !GenerateZedJSONFiles( &context, &options ) ) {
+			error( "Failed to generate Zed JSON files.\n" );
+			QUIT_ERROR();
+		}
+
+		zedJSONGenerationTimeMS = time_ms() - start;
 	} else if ( options.generateTenxWorkspace ) {
 
 		printf( "Generating 10x Workspace file\n" );
@@ -1431,7 +1535,7 @@ int BuilderMain( const int firstArg, int argc, const char * const * argv ) {
 
 		printf( "Done.\n\n" );
 
-		TenXEditorGenerationTimeMS = time_ms() - start;
+		tenxWorkspaceGenerationTimeMS = time_ms() - start;
 	} else {
 		// otherwise the user wants to actually build
 
@@ -1633,6 +1737,12 @@ int BuilderMain( const int firstArg, int argc, const char * const * argv ) {
 				}
 			}
 
+#ifdef _WIN32
+			if ( options.linkAgainstWindowsDynamicRuntime ) {
+				config->defines.push_back( "_DLL" );
+			}
+#endif
+
 			// make all non-absolute additional include paths relative to the build source file
 			For ( u64, includeIndex, 0, config->additionalIncludes.size() ) {
 				const char *additionalInclude = config->additionalIncludes[includeIndex].c_str();
@@ -1671,7 +1781,7 @@ int BuilderMain( const int firstArg, int argc, const char * const * argv ) {
 			{
 				float64 buildTimeStart = time_ms();
 
-				configBuildResults[configToBuildIndex] = BuildBinary( &context, config, &compilerBackend, options.generateCompilationDatabase );
+				configBuildResults[configToBuildIndex] = BuildBinary( &context, config, &compilerBackend, &options );
 
 				configBuildTimes[configToBuildIndex] = time_ms() - buildTimeStart;
 
@@ -1729,6 +1839,7 @@ int BuilderMain( const int firstArg, int argc, const char * const * argv ) {
 		};
 
 		Array<buildSummaryLine_t> buildSummaryLines;
+		buildSummaryLines.reserve( 4 + configsToBuild.size() );
 		buildSummaryLines.add( { "User config build",  userConfigBuildTimeMS, ( userConfigBuildResult == BUILD_RESULT_SKIPPED ) ? "(skipped)" : "" } );
 		buildSummaryLines.add( { "Compiler init time", compilerBackendInitTimeMS } );
 		buildSummaryLines.add( { "SetBuilderOptions",  setBuilderOptionsTimeMS } );
@@ -1736,7 +1847,7 @@ int BuilderMain( const int firstArg, int argc, const char * const * argv ) {
 			buildSummaryLines.add( { "Generate solution", visualStudioGenerationTimeMS } );
 		}
 		if ( options.generateTenxWorkspace) {
-			printf( "    Generate 10x Workspace:  %f ms\n", TenXEditorGenerationTimeMS );
+			printf( "    Generate 10x Workspace:  %f ms\n", tenxWorkspaceGenerationTimeMS );
 		}
 		For ( u32, configIndex, 0, configsToBuild.size() ) {
 			buildSummaryLines.add( { tprintf( "Build \"%s\"", configsToBuild[configIndex].name.c_str() ), configBuildTimes[configIndex], ( configBuildResults[configIndex] == BUILD_RESULT_SKIPPED ) ? "(skipped)" : "" } );
@@ -1755,10 +1866,10 @@ int BuilderMain( const int firstArg, int argc, const char * const * argv ) {
 				printf( "    %-*s: %f ms %s\n", lineLength, line->description, line->timeMS, line->suffix ? line->suffix : "" );
 			}
 		}
+		// leave this one separate at the end because we want to capture the end timestamp as late as possible
 		printf( "    %-*s: %f ms\n", lineLength, "Total time", time_ms() - totalTimeStart );
 		printf( "\n" );
 	}
 
 	return 0;
 }
-

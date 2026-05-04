@@ -150,6 +150,12 @@
     <ClCompile Include="src\win_support.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\vs_code.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\zed_editor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\builder_local.h">
@@ -290,5 +296,9 @@
       <Filter>Source Files</Filter>
     </None>
     <None Include="scripts\make_release.sh" />
+    <None Include="scripts\build_common.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="scripts\build_common.sh" />
   </ItemGroup>
 </Project>

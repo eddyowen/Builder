@@ -132,8 +132,10 @@
     <ClCompile Include="src\core\src\win64\timer.win64.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\visual_studio.cpp" />
+    <ClCompile Include="src\vs_code.cpp" />
     <ClCompile Include="src\win_sdk.cpp" />
     <ClCompile Include="src\win_support.cpp" />
+    <ClCompile Include="src\zed_editor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\builder.h" />
@@ -179,6 +181,8 @@
     <None Include="README.md" />
     <None Include="scripts\build.bat" />
     <None Include="scripts\build.sh" />
+    <None Include="scripts\build_common.bat" />
+    <None Include="scripts\build_common.sh" />
     <None Include="scripts\build_tests.bat" />
     <None Include="scripts\build_tests.sh" />
     <None Include="scripts\download_dependencies.bat" />

@@ -60,6 +60,7 @@ SOFTWARE.
 struct buildContext_t;
 
 struct Hashmap;
+struct StringBuilder;
 
 enum procFlagBits_t {
 	PROC_FLAG_SHOW_ARGS		= bit( 0 ),
@@ -79,7 +80,7 @@ struct compilerBackend_t {
 	bool8	( *Init )( compilerBackend_t *backend, const buildContext_t *context, const std::string &compilerPath, const std::string &compilerVersion );
 	void	( *Shutdown )( compilerBackend_t *backend );
 	bool8	( *CompileSourceFile )( compilerBackend_t *backend, buildContext_t *buildContext, BuildConfig *config, compilationCommandArchetype_t &commandArchetype, const char *sourceFile, bool recordCompilation );
-	bool8	( *LinkIntermediateFiles )( compilerBackend_t *backend, const Array<const char *> &intermediateFiles, BuildConfig *config );
+	bool8	( *LinkIntermediateFiles )( compilerBackend_t *backend, const Array<const char *> &intermediateFiles, BuildConfig *config, const BuilderOptions *options );
 	bool8	( *GetCompilationCommandArchetype )( const compilerBackend_t *backend, const BuildConfig *config, compilationCommandArchetype_t &outCmdArchetype );
 	void	( *GetIncludeDependenciesFromSourceFileBuild )( compilerBackend_t *backend, std::vector<std::string> &includeDependencies );
 	String	( *GetCompilerPath )( compilerBackend_t *backend );
@@ -147,13 +148,41 @@ void		RecordCompilationDatabaseEntry( buildContext_t *buildContext, const char *
 
 s32			RunProc( Array<const char *> *args, Array<const char *> *environmentVariables, const procFlags_t procFlags = 0, String *outStdout = NULL );
 
+bool8		WriteStringBuilderToFile( StringBuilder *stringBuilder, const char *filename );
+
+bool8		FileMatchesFilter( const char *filename, const char *filter );
+
+std::vector<std::string> GetSourceFilesMatchingPattern( const char *basePath, const char *pattern );
+
 bool8		GenerateVisualStudioSolution( buildContext_t *context, BuilderOptions *options );
 
 bool8		GenerateTenxWorkspace( buildContext_t *context, BuilderOptions *options);
 
 Compiler	GetCompiler( buildContext_t *context, BuilderOptions *options );
 
+bool8		GenerateVSCodeJSONFiles( buildContext_t *context, BuilderOptions *options );
+
+bool8		GenerateZedJSONFiles( buildContext_t *context, BuilderOptions *options );
+
 inline u64 minull( const u64 x, const u64 y ) {
 	return ( x < y ) ? x : y;
+}
+
+inline const char *LanguageVersionToString( const LanguageVersion version ) {
+	switch ( version ) {
+		case LANGUAGE_VERSION_UNSET:	return NULL;
+		case LANGUAGE_VERSION_C89:		return "c89";
+		case LANGUAGE_VERSION_C99:		return "c99";
+		case LANGUAGE_VERSION_C11:		return "c11";
+		case LANGUAGE_VERSION_C17:		return "c17";
+		case LANGUAGE_VERSION_C23:		return "c23";
+		case LANGUAGE_VERSION_CPP11:	return "c++11";
+		case LANGUAGE_VERSION_CPP14:	return "c++14";
+		case LANGUAGE_VERSION_CPP17:	return "c++17";
+		case LANGUAGE_VERSION_CPP20:	return "c++20";
+		case LANGUAGE_VERSION_CPP23:	return "c++23";
+	}
+
+	return NULL;
 }
 
